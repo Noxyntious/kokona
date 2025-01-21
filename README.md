@@ -6,6 +6,7 @@ a multipurpose simple text editor written with egui and rust.
 - file open/save/close
 
 ## planned features
+- ctrl+f searching!!!
 - syntax highlighting
 - tabs (maybe)
 - directory tree (also maybe)
