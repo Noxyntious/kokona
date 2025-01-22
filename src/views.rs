@@ -1,3 +1,4 @@
+#[allow(mutable_transmutes)]
 use eframe::egui;
 use std::sync::atomic::{AtomicBool, Ordering};
 #[derive(Default)]
@@ -11,8 +12,8 @@ struct SearchState {
     open: bool,
     query: String,
     case_sensitive: bool,
-    current_match: usize,         // Track current match index
-    matches: Vec<(usize, usize)>, // Store (start, end) positions of matches
+    current_match: usize,
+    matches: Vec<(usize, usize)>,
 }
 pub static WAS_MODIFIED: AtomicBool = AtomicBool::new(false);
 
@@ -40,25 +41,6 @@ impl SearchState {
             let match_end = match_start + query.len();
             self.matches.push((match_start, match_end));
             start = match_end;
-        }
-    }
-
-    fn save_file(filename: &mut String, text_content: &str) {
-        if *filename == "untitled.txt" {
-            if let Some(path) = rfd::FileDialog::new()
-                .set_title("Save")
-                .set_file_name(&filename[..])
-                .save_file()
-            {
-                // Save the contents to the file
-                if let Err(e) = std::fs::write(&path, text_content) {
-                    println!("Error saving file: {}", e);
-                } else {
-                    println!("File saved successfully to: {}", path.display());
-                    WAS_MODIFIED.store(false, Ordering::SeqCst);
-                }
-                *filename = path.display().to_string();
-            }
         }
     }
 

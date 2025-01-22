@@ -1,7 +1,9 @@
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+
 mod views;
 use clap::Parser;
 use eframe::{egui, App, Frame, NativeOptions};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::Ordering;
 use views::ViewType;
 use views::WAS_MODIFIED;
 
@@ -96,6 +98,9 @@ impl App for MyApp {
         //                ViewType::Editor => ViewType::Home,
         //            };
         //        }
+        // uncommenting this allows you to hit "Tab" to switch views
+        // this is debug behavior that should not be included in release builds
+        // except that it was in v0.1. oh well
     }
 }
 fn main() -> Result<(), eframe::Error> {
