@@ -1,9 +1,11 @@
 [package]
 name = "kokona"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 
 [dependencies]
+clap = { version = "4.5.27", features = ["derive"] }
 eframe = "0.30.0"
 egui = "0.30.0"
+egui_code_editor = "0.2.11"
 rfd = "0.15.2"

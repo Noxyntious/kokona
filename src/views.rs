@@ -5,6 +5,58 @@ pub enum ViewType {
     Home,
     Editor,
 }
+#[derive(Default)]
+struct SearchState {
+    open: bool,
+    query: String,
+    case_sensitive: bool,
+    current_match: usize,         // Track current match index
+    matches: Vec<(usize, usize)>, // Store (start, end) positions of matches
+}
+
+impl SearchState {
+    fn find_matches(&mut self, text: &str) {
+        self.matches.clear();
+        if self.query.is_empty() {
+            return;
+        }
+
+        let text_to_search = if self.case_sensitive {
+            text.to_string()
+        } else {
+            text.to_lowercase()
+        };
+        let query = if self.case_sensitive {
+            self.query.clone()
+        } else {
+            self.query.to_lowercase()
+        };
+
+        let mut start = 0;
+        while let Some(found) = text_to_search[start..].find(&query) {
+            let match_start = start + found;
+            let match_end = match_start + query.len();
+            self.matches.push((match_start, match_end));
+            start = match_end;
+        }
+    }
+
+    fn next_match(&mut self) {
+        if !self.matches.is_empty() {
+            self.current_match = (self.current_match + 1) % self.matches.len();
+        }
+    }
+
+    fn prev_match(&mut self) {
+        if !self.matches.is_empty() {
+            self.current_match = if self.current_match == 0 {
+                self.matches.len() - 1
+            } else {
+                self.current_match - 1
+            };
+        }
+    }
+}
 pub fn show_top_panel(ctx: &egui::Context, filename: &mut String, text_content: &mut String) {
     egui::TopBottomPanel::top("top_panel").show(ctx, |ui| {
         egui::menu::bar(ui, |ui| {
@@ -27,7 +79,31 @@ pub fn show_top_panel(ctx: &egui::Context, filename: &mut String, text_content: 
                     ui.close_menu();
                 }
                 if ui.button("Save").clicked() {
-                    println!("Save clicked");
+                    if filename == "untitled.txt" {
+                        if let Some(path) = rfd::FileDialog::new()
+                            .set_title("Save")
+                            .set_file_name(&filename[..])
+                            .save_file()
+                        {
+                            // Save the contents to the file
+                            if let Err(e) = std::fs::write(&path, &text_content) {
+                                println!("Error saving file: {}", e);
+                            } else {
+                                println!("File saved successfully to: {}", path.display());
+                            }
+                            *filename = path.display().to_string();
+                            ctx.send_viewport_cmd(egui::ViewportCommand::Title("Kokona".into()));
+                        }
+                    } else {
+                        // Save directly to existing path
+                        if let Err(e) = std::fs::write(&filename, &text_content) {
+                            println!("Error saving file: {}", e);
+                        } else {
+                            println!("File saved successfully to: {}", filename);
+                        }
+
+                        ctx.send_viewport_cmd(egui::ViewportCommand::Title("Kokona".into()));
+                    }
                     ui.close_menu();
                 }
                 if ui.button("Save As").clicked() {
@@ -45,6 +121,9 @@ pub fn show_top_panel(ctx: &egui::Context, filename: &mut String, text_content: 
                         *filename = path.display().to_string();
                         ctx.send_viewport_cmd(egui::ViewportCommand::Title("Kokona".into()));
                     }
+                    ui.close_menu();
+                }
+                if ui.button("Close").clicked() {
                     ui.close_menu();
                 }
                 if ui.button("Exit").clicked() {
@@ -84,7 +163,7 @@ pub fn show_top_panel(ctx: &egui::Context, filename: &mut String, text_content: 
                     .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0))
                     .show(ctx, |ui| {
                         ui.heading("Kokona");
-                        ui.label("Version 0.1");
+                        ui.label("Version 0.1.1");
                         ui.label("A simple text editor written in egui and Rust");
                         ui.add_space(8.0);
                         ui.label("Written by eri");
@@ -108,7 +187,7 @@ pub fn home_view(
             ui.heading(egui::RichText::new("Kokona").size(72.0));
             ui.vertical(|ui| {
                 ui.add_space(55.5);
-                ui.label("ver 0.1");
+                ui.label("ver 0.1.1");
             });
         });
         ui.add_space(30.0);
@@ -142,16 +221,101 @@ pub fn home_view(
     // Handle filename change after UI
     if should_create_new {
         *filename = String::from("untitled.txt");
+        *text = String::new();
+        ctx.send_viewport_cmd(egui::ViewportCommand::Title("Kokona".into()));
     }
 
     show_top_panel(ctx, filename, &mut String::from(""));
 }
 
-pub fn editor_view(ctx: &egui::Context, text: &mut String, filename: &mut String) {
+pub fn editor_view(ctx: &egui::Context, text: &mut String, filename: &mut String) -> bool {
+    let mut was_modified = false;
+    static mut SEARCH_STATE: Option<SearchState> = None;
+    unsafe {
+        if SEARCH_STATE.is_none() {
+            SEARCH_STATE = Some(SearchState::default());
+        }
+    }
+
     show_top_panel(ctx, filename, text);
+
+    // Check for Ctrl+F
+    if ctx.input(|i| i.key_pressed(egui::Key::F) && i.modifiers.command) {
+        unsafe {
+            if let Some(state) = SEARCH_STATE.as_mut() {
+                state.open = true;
+                state.find_matches(text);
+            }
+        }
+    }
+
+    // Show search overlay if open
+    unsafe {
+        if let Some(state) = SEARCH_STATE.as_mut() {
+            if state.open {
+                egui::Window::new("Search")
+                    .fixed_size([300.0, 100.0])
+                    .collapsible(false)
+                    .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+                    .show(ctx, |ui| {
+                        ui.horizontal(|ui| {
+                            let query_changed = ui.text_edit_singleline(&mut state.query).changed();
+                            if query_changed {
+                                state.find_matches(text);
+                                state.current_match = 0;
+                            }
+
+                            if ui.button("×").clicked() {
+                                state.open = false;
+                            }
+                        });
+
+                        ui.horizontal(|ui| {
+                            if ui
+                                .checkbox(&mut state.case_sensitive, "Case sensitive")
+                                .changed()
+                            {
+                                state.find_matches(text);
+                            }
+
+                            if ui.button("⬆ Previous").clicked()
+                                || ui.input(|i| i.key_pressed(egui::Key::N) && i.modifiers.shift)
+                            {
+                                state.prev_match();
+                            }
+                            if ui.button("⬇ Next").clicked()
+                                || ui.input(|i| i.key_pressed(egui::Key::N) && i.modifiers.command)
+                            {
+                                state.next_match();
+                            }
+                        });
+
+                        ui.label(format!(
+                            "{} matches found{}",
+                            state.matches.len(),
+                            if !state.matches.is_empty() {
+                                format!(
+                                    " (showing {}/{})",
+                                    state.current_match + 1,
+                                    state.matches.len()
+                                )
+                            } else {
+                                String::new()
+                            }
+                        ));
+
+                        if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+                            state.open = false;
+                        }
+                    });
+            }
+        }
+    }
+
     egui::CentralPanel::default().show(ctx, |ui| {
         let available_width = ui.available_width();
-        let available_height = ui.available_height() - 20.0; // Reserve space for bottom bar
+        let available_height = ui.available_height() - 20.0;
+
         egui::ScrollArea::vertical().show(ui, |ui| {
             ui.horizontal(|ui| {
                 // Line numbers
@@ -169,17 +333,90 @@ pub fn editor_view(ctx: &egui::Context, text: &mut String, filename: &mut String
                         .horizontal_align(egui::Align::RIGHT),
                 );
 
-                // Main text editor
-                let response = ui.add(
-                    egui::TextEdit::multiline(text)
-                        .desired_width(available_width - 50.0)
-                        .min_size(egui::vec2(available_width - 50.0, available_height))
-                        .font(egui::TextStyle::Monospace),
-                );
-                if response.changed() {
-                    ctx.send_viewport_cmd(egui::ViewportCommand::Title("Kokona | MODIFIED".into()));
-                }
-                // Get cursor position
+                // Text editor with highlighting
+                let text_edit = egui::TextEdit::multiline(text)
+                    .desired_width(available_width - 50.0)
+                    .min_size(egui::vec2(available_width - 50.0, available_height))
+                    .font(egui::TextStyle::Monospace);
+
+                let response = unsafe {
+                    if let Some(state) = SEARCH_STATE.as_mut() {
+                        if state.open && !state.matches.is_empty() {
+                            let mut layouter = |ui: &egui::Ui, string: &str, wrap_width: f32| {
+                                let mut layout_job = egui::text::LayoutJob::default();
+                                let mut last_end = 0;
+
+                                // Set default format to use monospace font
+                                let default_format = egui::TextFormat {
+                                    font_id: egui::FontId::monospace(12.0), // Fixed font size
+                                    ..Default::default()
+                                };
+
+                                for (idx, &(start, end)) in state.matches.iter().enumerate() {
+                                    // Add non-highlighted text with monospace
+                                    if last_end < start {
+                                        layout_job.append(
+                                            &string[last_end..start],
+                                            0.0,
+                                            default_format.clone(),
+                                        );
+                                    }
+
+                                    // Add highlighted text with monospace
+                                    let format = if idx == state.current_match {
+                                        egui::TextFormat {
+                                            background: egui::Color32::from_rgb(255, 255, 0),
+                                            font_id: egui::FontId::monospace(12.0),
+                                            ..Default::default()
+                                        }
+                                    } else {
+                                        egui::TextFormat {
+                                            background: egui::Color32::from_rgb(255, 255, 180),
+                                            font_id: egui::FontId::monospace(12.0),
+                                            ..Default::default()
+                                        }
+                                    };
+
+                                    layout_job.append(&string[start..end], 0.0, format);
+                                    last_end = end;
+                                }
+
+                                // Add remaining text with monospace
+                                if last_end < string.len() {
+                                    layout_job.append(&string[last_end..], 0.0, default_format);
+                                }
+
+                                ui.fonts(|f| f.layout_job(layout_job))
+                            };
+
+                            let response = ui.add(text_edit.layouter(&mut layouter));
+
+                            if response.changed() {
+                                was_modified = true; // Set the flag
+                                ctx.send_viewport_cmd(egui::ViewportCommand::Title(
+                                    "Kokona | MODIFIED".into(),
+                                ));
+                            }
+                            response
+                        } else {
+                            let response = ui.add(text_edit);
+                            if response.changed() {
+                                was_modified = true; // Set the flag
+                                ctx.send_viewport_cmd(egui::ViewportCommand::Title(
+                                    "Kokona | MODIFIED".into(),
+                                ));
+                            }
+                            response
+                        }
+                    } else {
+                        let response = ui.add(text_edit);
+                        if response.changed() {
+                            was_modified = true; // Set the flag
+                        }
+                        response
+                    }
+                };
+
                 let (line, col) = if response.has_focus() {
                     calculate_cursor_position(text)
                 } else {
@@ -190,6 +427,7 @@ pub fn editor_view(ctx: &egui::Context, text: &mut String, filename: &mut String
             });
         });
     });
+    was_modified
 }
 
 fn calculate_cursor_position(text: &str) -> (usize, usize) {
