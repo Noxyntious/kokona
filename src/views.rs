@@ -1,5 +1,6 @@
 #[allow(mutable_transmutes)]
 use eframe::egui;
+use rfd::MessageDialog;
 use std::sync::atomic::{AtomicBool, Ordering};
 #[derive(Default)]
 pub enum ViewType {
@@ -60,10 +61,15 @@ impl SearchState {
         }
     }
 }
-pub fn show_top_panel(ctx: &egui::Context, filename: &mut String, text_content: &mut String) {
+pub fn show_top_panel(
+    ctx: &egui::Context,
+    filename: &mut String,
+    text_content: &mut String,
+    current_view: &mut ViewType,
+) {
     egui::TopBottomPanel::top("top_panel").show(ctx, |ui| {
         egui::menu::bar(ui, |ui| {
-            ui.menu_button("File", |ui| {
+            ui.menu_button("Kokona", |ui| {
                 if ui.button("Open").clicked() {
                     if let Some(path) = rfd::FileDialog::new().set_title("Open File").pick_file() {
                         // Read the file contents
@@ -76,7 +82,13 @@ pub fn show_top_panel(ctx: &egui::Context, filename: &mut String, text_content: 
                                 ));
                                 println!("File opened successfully from: {}", path.display());
                             }
-                            Err(e) => println!("Error opening file: {}", e),
+                            Err(e) => {
+                                rfd::MessageDialog::new()
+                                    .set_title("Error")
+                                    .set_description(&format!("Error opening file: {}", e))
+                                    .set_level(rfd::MessageLevel::Error)
+                                    .show();
+                            }
                         }
                     }
                     ui.close_menu();
@@ -130,6 +142,8 @@ pub fn show_top_panel(ctx: &egui::Context, filename: &mut String, text_content: 
                     ui.close_menu();
                 }
                 if ui.button("Close").clicked() {
+                    *filename = String::from("");
+                    *current_view = ViewType::Home;
                     ui.close_menu();
                 }
                 if ui.button("Exit").clicked() {
@@ -138,13 +152,9 @@ pub fn show_top_panel(ctx: &egui::Context, filename: &mut String, text_content: 
                 }
             });
 
-            ui.menu_button("Edit", |ui| {
-                if ui.button("Cut").clicked() {
-                    println!("Cut clicked");
-                    ui.close_menu();
-                }
-                if ui.button("Copy").clicked() {
-                    println!("Copy clicked");
+            ui.menu_button("File", |ui| {
+                if ui.button("Search").clicked() {
+                    println!("Search clicked");
                     ui.close_menu();
                 }
             });
@@ -169,7 +179,7 @@ pub fn show_top_panel(ctx: &egui::Context, filename: &mut String, text_content: 
                     .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0))
                     .show(ctx, |ui| {
                         ui.heading("Kokona");
-                        ui.label("Version 0.2");
+                        ui.label(format!("Version {}", crate::consts::versioninfo::VERSION));
                         ui.label("A simple text editor written in egui and Rust");
                         ui.add_space(8.0);
                         ui.label("Written by eri");
@@ -193,7 +203,7 @@ pub fn home_view(
             ui.heading(egui::RichText::new("Kokona").size(72.0));
             ui.vertical(|ui| {
                 ui.add_space(55.5);
-                ui.label("ver 0.2");
+                ui.label(format!("ver {}", crate::consts::versioninfo::VERSION));
             });
         });
         ui.add_space(30.0);
@@ -231,10 +241,15 @@ pub fn home_view(
         ctx.send_viewport_cmd(egui::ViewportCommand::Title("Kokona".into()));
     }
 
-    show_top_panel(ctx, filename, &mut String::from(""));
+    show_top_panel(ctx, filename, &mut String::from(""), current_view);
 }
 
-pub fn editor_view(ctx: &egui::Context, text: &mut String, filename: &mut String) -> bool {
+pub fn editor_view(
+    ctx: &egui::Context,
+    text: &mut String,
+    filename: &mut String,
+    current_view: &mut ViewType,
+) -> bool {
     let mut was_modified = WAS_MODIFIED.load(Ordering::SeqCst);
     static mut SEARCH_STATE: Option<SearchState> = None;
     unsafe {
@@ -243,7 +258,7 @@ pub fn editor_view(ctx: &egui::Context, text: &mut String, filename: &mut String
         }
     }
 
-    show_top_panel(ctx, filename, text);
+    show_top_panel(ctx, filename, text, current_view);
 
     // Check for Ctrl+F
     if ctx.input(|i| i.key_pressed(egui::Key::F) && i.modifiers.command) {

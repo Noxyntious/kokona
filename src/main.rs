@@ -1,5 +1,6 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+pub mod consts;
 mod views;
 use clap::Parser;
 use eframe::{egui, App, Frame, NativeOptions};
@@ -33,7 +34,11 @@ impl App for MyApp {
                     ctx.send_viewport_cmd(egui::ViewportCommand::Title("Kokona".into()));
                 }
                 Err(e) => {
-                    eprintln!("Error opening file: {}", e);
+                    rfd::MessageDialog::new()
+                        .set_title("Error")
+                        .set_description(&format!("Error opening file: {}", e))
+                        .set_level(rfd::MessageLevel::Error)
+                        .show();
                 }
             }
         }
@@ -85,7 +90,12 @@ impl App for MyApp {
                 &mut self.opened,
             ),
             ViewType::Editor => {
-                let modified = views::editor_view(ctx, &mut self.opened, &mut self.filename);
+                let modified = views::editor_view(
+                    ctx,
+                    &mut self.opened,
+                    &mut self.filename,
+                    &mut self.current_view,
+                );
                 if modified {
                     self.is_modified = true;
                 }
