@@ -9,7 +9,7 @@ pub enum ViewType {
     Editor,
 }
 #[derive(Default)]
-struct SearchState {
+pub struct SearchState {
     open: bool,
     query: String,
     case_sensitive: bool,
@@ -17,7 +17,7 @@ struct SearchState {
     matches: Vec<(usize, usize)>,
 }
 pub static WAS_MODIFIED: AtomicBool = AtomicBool::new(false);
-
+static mut SEARCH_STATE: Option<SearchState> = None;
 impl SearchState {
     fn find_matches(&mut self, text: &str) {
         self.matches.clear();
@@ -67,6 +67,8 @@ pub fn show_top_panel(
     text_content: &mut String,
     current_view: &mut ViewType,
 ) {
+    let content_clone = text_content.clone(); // Clone it once
+    let mut should_open_search = false;
     egui::TopBottomPanel::top("top_panel").show(ctx, |ui| {
         egui::menu::bar(ui, |ui| {
             ui.menu_button("Kokona", |ui| {
@@ -151,13 +153,25 @@ pub fn show_top_panel(
                     ui.close_menu();
                 }
             });
-
             ui.menu_button("File", |ui| {
                 if ui.button("Search").clicked() {
-                    println!("Search clicked");
+                    should_open_search = true;
                     ui.close_menu();
                 }
             });
+
+            // After the menu bar, handle the search
+            if should_open_search {
+                unsafe {
+                    if SEARCH_STATE.is_none() {
+                        SEARCH_STATE = Some(SearchState::default());
+                    }
+                    if let Some(state) = SEARCH_STATE.as_mut() {
+                        state.open = true;
+                        state.find_matches(&content_clone);
+                    }
+                }
+            }
             ui.menu_button("Help", |ui| {
                 if ui.button("About").clicked() {
                     unsafe {
@@ -251,7 +265,7 @@ pub fn editor_view(
     current_view: &mut ViewType,
 ) -> bool {
     let mut was_modified = WAS_MODIFIED.load(Ordering::SeqCst);
-    static mut SEARCH_STATE: Option<SearchState> = None;
+    //static mut SEARCH_STATE: Option<SearchState> = None;
     unsafe {
         if SEARCH_STATE.is_none() {
             SEARCH_STATE = Some(SearchState::default());
@@ -365,116 +379,128 @@ pub fn editor_view(
         let available_width = ui.available_width();
         let available_height = ui.available_height() - 20.0;
 
-        egui::ScrollArea::vertical().show(ui, |ui| {
-            ui.horizontal(|ui| {
-                // Line numbers
-                let lines = text.split('\n').count().max(1);
-                let line_numbers = (1..=lines)
-                    .map(|i| i.to_string())
-                    .collect::<Vec<_>>()
-                    .join("\n");
-                ui.add(
-                    egui::TextEdit::multiline(&mut line_numbers.as_str())
-                        .desired_width(35.0)
-                        .min_size(egui::vec2(35.0, available_height))
-                        .interactive(false)
-                        .font(egui::TextStyle::Monospace)
-                        .horizontal_align(egui::Align::RIGHT),
-                );
+        egui::ScrollArea::vertical()
+            .max_height(available_height)
+            .show(ui, |ui| {
+                ui.horizontal(|ui| {
+                    // Line numbers
+                    let lines = text.split('\n').count().max(1);
+                    let line_numbers = (1..=lines)
+                        .map(|i| i.to_string())
+                        .collect::<Vec<_>>()
+                        .join("\n");
+                    ui.add(
+                        egui::TextEdit::multiline(&mut line_numbers.as_str())
+                            .desired_width(35.0)
+                            .min_size(egui::vec2(35.0, available_height))
+                            .interactive(false)
+                            .font(egui::TextStyle::Monospace)
+                            .horizontal_align(egui::Align::RIGHT),
+                    );
 
-                // Text editor with highlighting
-                let text_edit = egui::TextEdit::multiline(text)
-                    .desired_width(available_width - 50.0)
-                    .min_size(egui::vec2(available_width - 50.0, available_height))
-                    .font(egui::TextStyle::Monospace);
+                    // Text editor with highlighting
+                    let text_edit = egui::TextEdit::multiline(text)
+                        .desired_width(available_width - 50.0)
+                        .min_size(egui::vec2(available_width - 50.0, available_height))
+                        .font(egui::TextStyle::Monospace);
 
-                let response = unsafe {
-                    if let Some(state) = SEARCH_STATE.as_mut() {
-                        if state.open && !state.matches.is_empty() {
-                            let mut layouter = |ui: &egui::Ui, string: &str, wrap_width: f32| {
-                                let mut layout_job = egui::text::LayoutJob::default();
-                                let mut last_end = 0;
+                    let response = unsafe {
+                        if let Some(state) = SEARCH_STATE.as_mut() {
+                            if state.open && !state.matches.is_empty() {
+                                let mut layouter =
+                                    |ui: &egui::Ui, string: &str, wrap_width: f32| {
+                                        let mut layout_job = egui::text::LayoutJob::default();
+                                        let mut last_end = 0;
 
-                                // Set default format to use monospace font
-                                let default_format = egui::TextFormat {
-                                    font_id: egui::FontId::monospace(12.0), // Fixed font size
-                                    ..Default::default()
-                                };
-
-                                for (idx, &(start, end)) in state.matches.iter().enumerate() {
-                                    // Add non-highlighted text with monospace
-                                    if last_end < start {
-                                        layout_job.append(
-                                            &string[last_end..start],
-                                            0.0,
-                                            default_format.clone(),
-                                        );
-                                    }
-
-                                    // Add highlighted text with monospace
-                                    let format = if idx == state.current_match {
-                                        egui::TextFormat {
-                                            background: egui::Color32::from_rgb(255, 255, 0),
-                                            font_id: egui::FontId::monospace(12.0),
+                                        // Set default format to use monospace font
+                                        let default_format = egui::TextFormat {
+                                            font_id: egui::FontId::monospace(12.0), // Fixed font size
                                             ..Default::default()
+                                        };
+
+                                        for (idx, &(start, end)) in state.matches.iter().enumerate()
+                                        {
+                                            // Add non-highlighted text with monospace
+                                            if last_end < start {
+                                                layout_job.append(
+                                                    &string[last_end..start],
+                                                    0.0,
+                                                    default_format.clone(),
+                                                );
+                                            }
+
+                                            // Add highlighted text with monospace
+                                            let format = if idx == state.current_match {
+                                                egui::TextFormat {
+                                                    background: egui::Color32::from_rgb(
+                                                        255, 255, 0,
+                                                    ),
+                                                    font_id: egui::FontId::monospace(12.0),
+                                                    ..Default::default()
+                                                }
+                                            } else {
+                                                egui::TextFormat {
+                                                    background: egui::Color32::from_rgb(
+                                                        255, 255, 180,
+                                                    ),
+                                                    font_id: egui::FontId::monospace(12.0),
+                                                    ..Default::default()
+                                                }
+                                            };
+
+                                            layout_job.append(&string[start..end], 0.0, format);
+                                            last_end = end;
                                         }
-                                    } else {
-                                        egui::TextFormat {
-                                            background: egui::Color32::from_rgb(255, 255, 180),
-                                            font_id: egui::FontId::monospace(12.0),
-                                            ..Default::default()
+
+                                        // Add remaining text with monospace
+                                        if last_end < string.len() {
+                                            layout_job.append(
+                                                &string[last_end..],
+                                                0.0,
+                                                default_format,
+                                            );
                                         }
+
+                                        ui.fonts(|f| f.layout_job(layout_job))
                                     };
 
-                                    layout_job.append(&string[start..end], 0.0, format);
-                                    last_end = end;
+                                let response = ui.add(text_edit.layouter(&mut layouter));
+
+                                if response.changed() {
+                                    WAS_MODIFIED.store(true, Ordering::SeqCst); // Set the flag
+                                    ctx.send_viewport_cmd(egui::ViewportCommand::Title(
+                                        "Kokona | MODIFIED".into(),
+                                    ));
                                 }
-
-                                // Add remaining text with monospace
-                                if last_end < string.len() {
-                                    layout_job.append(&string[last_end..], 0.0, default_format);
+                                response
+                            } else {
+                                let response = ui.add(text_edit);
+                                if response.changed() {
+                                    WAS_MODIFIED.store(true, Ordering::SeqCst); // Set the flag
+                                    ctx.send_viewport_cmd(egui::ViewportCommand::Title(
+                                        "Kokona | MODIFIED".into(),
+                                    ));
                                 }
-
-                                ui.fonts(|f| f.layout_job(layout_job))
-                            };
-
-                            let response = ui.add(text_edit.layouter(&mut layouter));
-
-                            if response.changed() {
-                                WAS_MODIFIED.store(true, Ordering::SeqCst); // Set the flag
-                                ctx.send_viewport_cmd(egui::ViewportCommand::Title(
-                                    "Kokona | MODIFIED".into(),
-                                ));
+                                response
                             }
-                            response
                         } else {
                             let response = ui.add(text_edit);
                             if response.changed() {
                                 WAS_MODIFIED.store(true, Ordering::SeqCst); // Set the flag
-                                ctx.send_viewport_cmd(egui::ViewportCommand::Title(
-                                    "Kokona | MODIFIED".into(),
-                                ));
                             }
                             response
                         }
+                    };
+
+                    let (line, col) = if response.has_focus() {
+                        calculate_cursor_position(text)
                     } else {
-                        let response = ui.add(text_edit);
-                        if response.changed() {
-                            WAS_MODIFIED.store(true, Ordering::SeqCst); // Set the flag
-                        }
-                        response
-                    }
-                };
+                        (1, 1)
+                    };
 
-                let (line, col) = if response.has_focus() {
-                    calculate_cursor_position(text)
-                } else {
-                    (1, 1)
-                };
-
-                show_bottom_status_bar(ctx, line, col, text);
+                    show_bottom_status_bar(ctx, line, col, text);
+                });
             });
-        });
     });
     was_modified = WAS_MODIFIED.load(Ordering::SeqCst);
     was_modified
