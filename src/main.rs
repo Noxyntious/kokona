@@ -1,7 +1,9 @@
 mod views;
 use clap::Parser;
 use eframe::{egui, App, Frame, NativeOptions};
+use std::sync::atomic::{AtomicBool, Ordering};
 use views::ViewType;
+use views::WAS_MODIFIED;
 
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
@@ -35,7 +37,8 @@ impl App for MyApp {
         }
         // Handle close request first, before any other updates
         if ctx.input(|i| i.viewport().close_requested()) && !self.show_confirm_dialog {
-            if self.is_modified {
+            let modif = WAS_MODIFIED.load(Ordering::SeqCst);
+            if modif {
                 self.show_confirm_dialog = true;
                 ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
                 return; // Exit early to prevent the close
@@ -59,7 +62,7 @@ impl App for MyApp {
                         ui.add_space(8.0);
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                             if ui.button("Yes").clicked() {
-                                self.is_modified = false;
+                                WAS_MODIFIED.store(false, Ordering::SeqCst);
                                 self.show_confirm_dialog = false;
                                 ctx.send_viewport_cmd(egui::ViewportCommand::Close);
                                 return;

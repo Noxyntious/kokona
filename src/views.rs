@@ -1,4 +1,5 @@
 use eframe::egui;
+use std::sync::atomic::{AtomicBool, Ordering};
 #[derive(Default)]
 pub enum ViewType {
     #[default]
@@ -13,6 +14,7 @@ struct SearchState {
     current_match: usize,         // Track current match index
     matches: Vec<(usize, usize)>, // Store (start, end) positions of matches
 }
+pub static WAS_MODIFIED: AtomicBool = AtomicBool::new(false);
 
 impl SearchState {
     fn find_matches(&mut self, text: &str) {
@@ -38,6 +40,25 @@ impl SearchState {
             let match_end = match_start + query.len();
             self.matches.push((match_start, match_end));
             start = match_end;
+        }
+    }
+
+    fn save_file(filename: &mut String, text_content: &str) {
+        if *filename == "untitled.txt" {
+            if let Some(path) = rfd::FileDialog::new()
+                .set_title("Save")
+                .set_file_name(&filename[..])
+                .save_file()
+            {
+                // Save the contents to the file
+                if let Err(e) = std::fs::write(&path, text_content) {
+                    println!("Error saving file: {}", e);
+                } else {
+                    println!("File saved successfully to: {}", path.display());
+                    WAS_MODIFIED.store(false, Ordering::SeqCst);
+                }
+                *filename = path.display().to_string();
+            }
         }
     }
 
@@ -90,6 +111,7 @@ pub fn show_top_panel(ctx: &egui::Context, filename: &mut String, text_content: 
                                 println!("Error saving file: {}", e);
                             } else {
                                 println!("File saved successfully to: {}", path.display());
+                                WAS_MODIFIED.store(false, Ordering::SeqCst);
                             }
                             *filename = path.display().to_string();
                             ctx.send_viewport_cmd(egui::ViewportCommand::Title("Kokona".into()));
@@ -100,6 +122,7 @@ pub fn show_top_panel(ctx: &egui::Context, filename: &mut String, text_content: 
                             println!("Error saving file: {}", e);
                         } else {
                             println!("File saved successfully to: {}", filename);
+                            WAS_MODIFIED.store(false, Ordering::SeqCst);
                         }
 
                         ctx.send_viewport_cmd(egui::ViewportCommand::Title("Kokona".into()));
@@ -117,6 +140,7 @@ pub fn show_top_panel(ctx: &egui::Context, filename: &mut String, text_content: 
                             println!("Error saving file: {}", e);
                         } else {
                             println!("File saved successfully to: {}", path.display());
+                            WAS_MODIFIED.store(false, Ordering::SeqCst);
                         }
                         *filename = path.display().to_string();
                         ctx.send_viewport_cmd(egui::ViewportCommand::Title("Kokona".into()));
@@ -163,7 +187,7 @@ pub fn show_top_panel(ctx: &egui::Context, filename: &mut String, text_content: 
                     .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0))
                     .show(ctx, |ui| {
                         ui.heading("Kokona");
-                        ui.label("Version 0.1.1");
+                        ui.label("Version 0.2");
                         ui.label("A simple text editor written in egui and Rust");
                         ui.add_space(8.0);
                         ui.label("Written by eri");
@@ -187,7 +211,7 @@ pub fn home_view(
             ui.heading(egui::RichText::new("Kokona").size(72.0));
             ui.vertical(|ui| {
                 ui.add_space(55.5);
-                ui.label("ver 0.1.1");
+                ui.label("ver 0.2");
             });
         });
         ui.add_space(30.0);
@@ -229,7 +253,7 @@ pub fn home_view(
 }
 
 pub fn editor_view(ctx: &egui::Context, text: &mut String, filename: &mut String) -> bool {
-    let mut was_modified = false;
+    let mut was_modified = WAS_MODIFIED.load(Ordering::SeqCst);
     static mut SEARCH_STATE: Option<SearchState> = None;
     unsafe {
         if SEARCH_STATE.is_none() {
@@ -248,7 +272,35 @@ pub fn editor_view(ctx: &egui::Context, text: &mut String, filename: &mut String
             }
         }
     }
+    if ctx.input(|i| i.key_pressed(egui::Key::S) && i.modifiers.command) {
+        if filename == "untitled.txt" {
+            if let Some(path) = rfd::FileDialog::new()
+                .set_title("Save")
+                .set_file_name(&filename[..])
+                .save_file()
+            {
+                // Save the contents to the file
+                if let Err(e) = std::fs::write(&path, &text) {
+                    println!("Error saving file: {}", e);
+                } else {
+                    println!("File saved successfully to: {}", path.display());
+                    WAS_MODIFIED.store(false, Ordering::SeqCst);
+                }
+                *filename = path.display().to_string();
+                ctx.send_viewport_cmd(egui::ViewportCommand::Title("Kokona".into()));
+            }
+        } else {
+            // Save directly to existing path
+            if let Err(e) = std::fs::write(&filename, &text) {
+                println!("Error saving file: {}", e);
+            } else {
+                println!("File saved successfully to: {}", filename);
+                WAS_MODIFIED.store(false, Ordering::SeqCst);
+            }
 
+            ctx.send_viewport_cmd(egui::ViewportCommand::Title("Kokona".into()));
+        }
+    }
     // Show search overlay if open
     unsafe {
         if let Some(state) = SEARCH_STATE.as_mut() {
@@ -392,7 +444,7 @@ pub fn editor_view(ctx: &egui::Context, text: &mut String, filename: &mut String
                             let response = ui.add(text_edit.layouter(&mut layouter));
 
                             if response.changed() {
-                                was_modified = true; // Set the flag
+                                WAS_MODIFIED.store(true, Ordering::SeqCst); // Set the flag
                                 ctx.send_viewport_cmd(egui::ViewportCommand::Title(
                                     "Kokona | MODIFIED".into(),
                                 ));
@@ -401,7 +453,7 @@ pub fn editor_view(ctx: &egui::Context, text: &mut String, filename: &mut String
                         } else {
                             let response = ui.add(text_edit);
                             if response.changed() {
-                                was_modified = true; // Set the flag
+                                WAS_MODIFIED.store(true, Ordering::SeqCst); // Set the flag
                                 ctx.send_viewport_cmd(egui::ViewportCommand::Title(
                                     "Kokona | MODIFIED".into(),
                                 ));
@@ -411,7 +463,7 @@ pub fn editor_view(ctx: &egui::Context, text: &mut String, filename: &mut String
                     } else {
                         let response = ui.add(text_edit);
                         if response.changed() {
-                            was_modified = true; // Set the flag
+                            WAS_MODIFIED.store(true, Ordering::SeqCst); // Set the flag
                         }
                         response
                     }
@@ -427,6 +479,7 @@ pub fn editor_view(ctx: &egui::Context, text: &mut String, filename: &mut String
             });
         });
     });
+    was_modified = WAS_MODIFIED.load(Ordering::SeqCst);
     was_modified
 }
 
