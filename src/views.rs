@@ -74,11 +74,13 @@ pub fn show_top_panel(
             ui.menu_button("Kokona", |ui| {
                 if ui.button("Open").clicked() {
                     if let Some(path) = rfd::FileDialog::new().set_title("Open File").pick_file() {
-                        // Read the file contents
+                        // Read the file contents first
                         match std::fs::read_to_string(&path) {
                             Ok(content) => {
                                 *text_content = content; // Update the TextEdit content
                                 *filename = path.display().to_string(); // Set filename to the path
+                                                                        // Switch view after content is loaded
+                                *current_view = ViewType::Editor;
                                 ctx.send_viewport_cmd(egui::ViewportCommand::Title(
                                     "Kokona".into(),
                                 ));
@@ -146,6 +148,8 @@ pub fn show_top_panel(
                 if ui.button("Close").clicked() {
                     *filename = String::from("");
                     *current_view = ViewType::Home;
+                    WAS_MODIFIED.store(false, Ordering::SeqCst);
+                    ctx.send_viewport_cmd(egui::ViewportCommand::Title("Kokona".into()));
                     ui.close_menu();
                 }
                 if ui.button("Exit").clicked() {
@@ -255,7 +259,7 @@ pub fn home_view(
         ctx.send_viewport_cmd(egui::ViewportCommand::Title("Kokona".into()));
     }
 
-    show_top_panel(ctx, filename, &mut String::from(""), current_view);
+    show_top_panel(ctx, filename, text, current_view);
 }
 
 pub fn editor_view(
@@ -383,12 +387,28 @@ pub fn editor_view(
             .max_height(available_height)
             .show(ui, |ui| {
                 ui.horizontal(|ui| {
-                    // Line numbers
                     let lines = text.split('\n').count().max(1);
+                    let text_layout = ui.available_size_before_wrap();
+                    let chars_per_line = (text_layout.x / 8.0).max(1.0) as usize; // Ensure minimum of 1 character per line
+
+                    // Calculate line numbers with wrapping
                     let line_numbers = (1..=lines)
-                        .map(|i| i.to_string())
+                        .flat_map(|i| {
+                            let line = text.lines().nth(i - 1).unwrap_or("");
+                            let wrap_count = if chars_per_line > 0 {
+                                (line.len() + chars_per_line - 1) / chars_per_line
+                            // Ceiling division
+                            } else {
+                                1
+                            };
+                            std::iter::once(i.to_string()).chain(
+                                std::iter::repeat("-".to_string())
+                                    .take(wrap_count.saturating_sub(1)),
+                            )
+                        })
                         .collect::<Vec<_>>()
                         .join("\n");
+
                     ui.add(
                         egui::TextEdit::multiline(&mut line_numbers.as_str())
                             .desired_width(35.0)
