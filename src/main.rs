@@ -176,6 +176,7 @@ impl App for MyApp {
         // uncommenting this allows you to hit "Tab" to switch views
         // this is debug behavior that should not be included in release builds
         // except that it was in v0.1. oh well
+
     }
 }
 
