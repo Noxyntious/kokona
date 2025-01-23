@@ -72,14 +72,15 @@ impl MyApp {
             } else {
                 "No file open".to_string()
             };
-
+            let kkv = crate::consts::versioninfo::VERSION;
+            let version_text = format!("Kokona Text Editor version {}", kkv);
             let activity = activity::Activity::new()
                 .state(&state)
                 .details(details)
                 .assets(
                     activity::Assets::new()
                         .large_image("kokona")
-                        .large_text("Kokona Text Editor"),
+                        .large_text(&version_text),
                 )
                 .timestamps(activity::Timestamps::new().start(self.start_time.try_into().unwrap()));
 
