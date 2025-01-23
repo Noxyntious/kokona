@@ -4,16 +4,15 @@ a multipurpose simple text editor written with egui and rust.
 ## current features
 - editing text
 - file open/save/close
+- search
 
 ## planned features
-- ctrl+f searching!!! - added in upstream and upcoming 0.2
 - syntax highlighting
 - tabs (maybe)
 - directory tree (also maybe)
 
 ## buggies (inevitable)
 - line and col counters are a little wonky
-- save doesnt work (must use save as) - fixed in upstream and upcoming 0.2
 
 ## install
 download from releases or use "cargo install --git" to install from upstream
