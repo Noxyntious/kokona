@@ -37,5 +37,5 @@ jobs:
       - name: Create Release Artifact
         uses: actions/upload-artifact@v3
         with:
-          name: kokona-darwin-arm
-          path: target/aarch64-apple-darwin/release/kokona-darwin-aarch64
+          name: kokona-darwin-aarch64
+          path: target/aarch64-apple-darwin/release/kokona
