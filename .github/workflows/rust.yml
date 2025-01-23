@@ -12,22 +12,23 @@ on:
       - "README.md"
       - ".github/workflows/rust.yml"
   workflow_dispatch:
+
 env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  build-mac:
+  build-mac-release:
     runs-on: macos-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@v1
+      - uses: actions/checkout@v4
+
       - name: Cache Rust dependencies
-        uses: actions/cache@v1.0.1
+        uses: actions/cache@v4
         with:
           path: target
-          key: ${{ runner.OS }}-build-${{ hashFiles('**/Cargo.lock') }}
+          key: ${{ runner.OS }}-build-release-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: |
-            ${{ runner.OS }}-build-
+            ${{ runner.OS }}-build-release-
 
       - name: Install Rust toolchain (Apple Silicon)
         uses: actions-rs/toolchain@v1
@@ -36,27 +37,58 @@ jobs:
           target: aarch64-apple-darwin
           override: true
 
-      - name: Build for mac
+      - name: Build for mac (Release)
         run: cargo build --release --target aarch64-apple-darwin
 
-      - name: Create Release Artifact
-        uses: actions/upload-artifact@v3
+      - name: Upload Mac Build (Release)
+        uses: actions/upload-artifact@v4
         with:
-          name: kokona-darwin-aarch64
+          name: kokona-darwin-aarch64-release
           path: target/aarch64-apple-darwin/release/kokona
+          compression-level: 0
+
+  build-mac-debug:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cache Rust dependencies
+        uses: actions/cache@v4
+        with:
+          path: target
+          key: ${{ runner.OS }}-build-debug-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.OS }}-build-debug-
+
+      - name: Install Rust toolchain (Apple Silicon)
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          target: aarch64-apple-darwin
+          override: true
+
+      - name: Build for mac (Debug)
+        run: cargo build --target aarch64-apple-darwin
+
+      - name: Upload Mac Build (Debug)
+        uses: actions/upload-artifact@v4
+        with:
+          name: kokona-darwin-aarch64-debug
+          path: target/aarch64-apple-darwin/debug/kokona
+          compression-level: 0
 
   build-windows:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@v1
+      - uses: actions/checkout@v4
+
       - name: Cache Rust dependencies
-        uses: actions/cache@v1.0.1
+        uses: actions/cache@v4
         with:
           path: target
-          key: ${{ runner.OS }}-build-${{ hashFiles('**/Cargo.lock') }}
+          key: ${{ runner.OS }}-build-debug-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: |
-            ${{ runner.OS }}-build-
+            ${{ runner.OS }}-build-debug-
 
       - name: Install Rust toolchain
         uses: actions-rs/toolchain@v1
@@ -68,27 +100,28 @@ jobs:
       - name: Install mingw-w64
         run: sudo apt-get update && sudo apt-get install -y mingw-w64
 
-      - name: Build for Windows
-        run: cargo build --release --target x86_64-pc-windows-gnu
+      - name: Build for Windows (Debug)
+        run: cargo build --target x86_64-pc-windows-gnu
 
-      - name: Create Release Artifact
-        uses: actions/upload-artifact@v3
+      - name: Upload Windows Build (Debug)
+        uses: actions/upload-artifact@v4
         with:
-          name: kokona-windows-x86_64
-          path: target/x86_64-pc-windows-gnu/release/kokona.exe
+          name: kokona-windows-x86_64-debug
+          path: target/x86_64-pc-windows-gnu/debug/kokona.exe
+          compression-level: 0
 
   build-linux:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@v1
+      - uses: actions/checkout@v4
+
       - name: Cache Rust dependencies
-        uses: actions/cache@v1.0.1
+        uses: actions/cache@v4
         with:
           path: target
-          key: ${{ runner.OS }}-build-${{ hashFiles('**/Cargo.lock') }}
+          key: ${{ runner.OS }}-build-debug-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: |
-            ${{ runner.OS }}-build-
+            ${{ runner.OS }}-build-debug-
 
       - name: Install Rust toolchain
         uses: actions-rs/toolchain@v1
@@ -97,11 +130,12 @@ jobs:
           target: x86_64-unknown-linux-gnu
           override: true
 
-      - name: Build for Linux
-        run: cargo build --release --target x86_64-unknown-linux-gnu
+      - name: Build for Linux (Debug)
+        run: cargo build --target x86_64-unknown-linux-gnu
 
-      - name: Create Release Artifact
-        uses: actions/upload-artifact@v3
+      - name: Upload Linux Build (Debug)
+        uses: actions/upload-artifact@v4
         with:
-          name: kokona-linux-x86_64
-          path: target/x86_64-unknown-linux-gnu/release/kokona
+          name: kokona-linux-x86_64-debug
+          path: target/x86_64-unknown-linux-gnu/debug/kokona
+          compression-level: 0
