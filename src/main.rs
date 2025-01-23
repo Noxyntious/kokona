@@ -1,5 +1,6 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
-
+use discord_rich_presence::{activity, DiscordIpc, DiscordIpcClient};
+use std::time::SystemTime;
 pub mod consts;
 mod views;
 use clap::Parser;
@@ -21,10 +22,75 @@ struct MyApp {
     show_confirm_dialog: bool,
     is_modified: bool,
     initial_file: Option<String>,
+    discord: Option<DiscordIpcClient>,
+    start_time: u64,
+}
+
+impl MyApp {
+    fn new(initial_file: Option<String>) -> Self {
+        let mut discord = DiscordIpcClient::new("1332013100097863780").unwrap();
+        let _ = discord.connect();
+
+        let start_time = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+
+        Self {
+            current_view: ViewType::default(),
+            opened: String::new(),
+            filename: String::new(),
+            show_confirm_dialog: false,
+            is_modified: false,
+            initial_file,
+            discord: Some(discord),
+            start_time,
+        }
+    }
+
+    fn update_discord_presence(&mut self) {
+        if let Some(discord) = &mut self.discord {
+            let details = match self.current_view {
+                ViewType::Home => "On Home Screen",
+                ViewType::Editor => {
+                    if self.filename.is_empty() {
+                        "Editing Untitled File"
+                    } else {
+                        "Editing File"
+                    }
+                }
+            };
+
+            let state = if !self.filename.is_empty() {
+                format!(
+                    "Working on: {}",
+                    std::path::Path::new(&self.filename)
+                        .file_name()
+                        .unwrap_or_default()
+                        .to_string_lossy()
+                )
+            } else {
+                "No file open".to_string()
+            };
+
+            let activity = activity::Activity::new()
+                .state(&state)
+                .details(details)
+                .assets(
+                    activity::Assets::new()
+                        .large_image("kokona")
+                        .large_text("Kokona Text Editor"),
+                )
+                .timestamps(activity::Timestamps::new().start(self.start_time.try_into().unwrap()));
+
+            let _ = discord.set_activity(activity);
+        }
+    }
 }
 
 impl App for MyApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut Frame) {
+        self.update_discord_presence();
         if let Some(file_path) = self.initial_file.take() {
             match std::fs::read_to_string(&file_path) {
                 Ok(content) => {
@@ -42,20 +108,18 @@ impl App for MyApp {
                 }
             }
         }
-        // Handle close request first, before any other updates
         if ctx.input(|i| i.viewport().close_requested()) && !self.show_confirm_dialog {
             let modif = WAS_MODIFIED.load(Ordering::SeqCst);
             if modif {
                 self.show_confirm_dialog = true;
                 ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
-                return; // Exit early to prevent the close
+                return;
             } else {
                 ctx.send_viewport_cmd(egui::ViewportCommand::Close);
                 return;
             }
         }
 
-        // Show dialog if needed
         if self.show_confirm_dialog {
             egui::Window::new("Unsaved Changes")
                 .collapsible(false)
@@ -113,6 +177,7 @@ impl App for MyApp {
         // except that it was in v0.1. oh well
     }
 }
+
 fn main() -> Result<(), eframe::Error> {
     let cli = Cli::parse();
 
@@ -123,8 +188,7 @@ fn main() -> Result<(), eframe::Error> {
         ..Default::default()
     };
 
-    let mut app = MyApp::default();
-    app.initial_file = cli.file;
+    let mut app = MyApp::new(cli.file);
 
     eframe::run_native("Kokona", options, Box::new(move |_cc| Ok(Box::new(app))))
 }

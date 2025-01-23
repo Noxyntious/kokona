@@ -1,6 +1,5 @@
 #[allow(mutable_transmutes)]
 use eframe::egui;
-use rfd::MessageDialog;
 use std::sync::atomic::{AtomicBool, Ordering};
 #[derive(Default)]
 pub enum ViewType {
@@ -67,7 +66,7 @@ pub fn show_top_panel(
     text_content: &mut String,
     current_view: &mut ViewType,
 ) {
-    let content_clone = text_content.clone(); // Clone it once
+    let content_clone = text_content.clone();
     let mut should_open_search = false;
     egui::TopBottomPanel::top("top_panel").show(ctx, |ui| {
         egui::menu::bar(ui, |ui| {
