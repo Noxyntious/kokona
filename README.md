@@ -7,9 +7,7 @@ a multipurpose simple text editor written with egui and rust.
 - search
 
 ## planned features
-- syntax highlighting
-- tabs (maybe)
-- directory tree (also maybe)
+- syntax highlighting (added in upstream and upcoming 0.3)
 
 ## buggies (inevitable)
 - line and col counters are a little wonky
