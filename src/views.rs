@@ -1,4 +1,3 @@
-#[allow(mutable_transmutes)]
 use eframe::egui;
 use std::sync::atomic::{AtomicBool, Ordering};
 use syntect::easy::HighlightLines;
@@ -24,7 +23,6 @@ pub struct SearchState {
 
 pub struct EditorState {
     ps: SyntaxSet,
-    ts: ThemeSet,
     syntax: Option<SyntaxReference>,
     theme: Theme,
     cached_highlights: Vec<(egui::TextFormat, String)>,
@@ -39,7 +37,6 @@ impl EditorState {
 
         Self {
             ps,
-            ts,
             syntax: None,
             theme,
             cached_highlights: Vec::new(),
@@ -362,7 +359,24 @@ pub fn home_view(
         *text = String::new();
         ctx.send_viewport_cmd(egui::ViewportCommand::Title("Kokona".into()));
     }
-
+    // Check for Ctrl+O
+    if ctx.input(|i| i.key_pressed(egui::Key::O) && i.modifiers.command) {
+        if let Some(path) = rfd::FileDialog::new().set_title("Open File").pick_file() {
+            match std::fs::read_to_string(&path) {
+                Ok(content) => {
+                    *current_view = ViewType::Editor; // Switch to editor view
+                    *filename = path.display().to_string(); // Set the filename
+                    *text = content; // This will be shown in the TextEdit
+                    unsafe {
+                        if let Some(editor_state) = EDITOR_STATE.as_mut() {
+                            editor_state.set_syntax_for_extension(&filename);
+                        }
+                    }
+                }
+                Err(e) => println!("Error opening file: {}", e),
+            }
+        }
+    }
     show_top_panel(ctx, filename, text, current_view);
 }
 
@@ -394,6 +408,25 @@ pub fn editor_view(
             if let Some(state) = SEARCH_STATE.as_mut() {
                 state.open = true;
                 state.find_matches(text);
+            }
+        }
+    }
+
+    // Check for Ctrl+O
+    if ctx.input(|i| i.key_pressed(egui::Key::O) && i.modifiers.command) {
+        if let Some(path) = rfd::FileDialog::new().set_title("Open File").pick_file() {
+            match std::fs::read_to_string(&path) {
+                Ok(content) => {
+                    *current_view = ViewType::Editor; // Switch to editor view
+                    *filename = path.display().to_string(); // Set the filename
+                    *text = content; // This will be shown in the TextEdit
+                    unsafe {
+                        if let Some(editor_state) = EDITOR_STATE.as_mut() {
+                            editor_state.set_syntax_for_extension(&filename);
+                        }
+                    }
+                }
+                Err(e) => println!("Error opening file: {}", e),
             }
         }
     }
@@ -499,10 +532,6 @@ pub fn editor_view(
             .max_height(available_height)
             .show(ui, |ui| {
                 ui.horizontal(|ui| {
-                    let lines = text.split('\n').count().max(1);
-                    let text_layout = ui.available_size_before_wrap();
-                    let chars_per_line = (text_layout.x / 8.0).max(1.0) as usize;
-
                     let line_numbers = unsafe {
                         let current_lines = text.split('\n').count().max(1);
                         let text_layout = ui.available_size_before_wrap();

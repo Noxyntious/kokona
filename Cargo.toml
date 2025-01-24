@@ -8,5 +8,6 @@ clap = { version = "4.5.27", features = ["derive"] }
 discord-rich-presence = "0.2.5"
 eframe = "0.30.0"
 egui = "0.30.0"
+image = "0.24.0"
 rfd = "0.15.2"
 syntect = "5.2.0"

@@ -173,7 +173,6 @@ impl App for MyApp {
 }
 fn main() -> Result<(), eframe::Error> {
     let cli = Cli::parse();
-
     let mut discord = DiscordIpcClient::new("1332264064025362493").unwrap();
     discord.connect().ok();
 
