@@ -133,11 +133,15 @@ impl App for MyApp {
                             discord_rich_presence::activity::Activity::new()
                                 .details(&format!(
                                     "In {}",
-                                    std::path::Path::new(&self.filename)
-                                        .parent()
-                                        .and_then(|p| p.file_name())
-                                        .and_then(|n| n.to_str())
-                                        .unwrap_or("Unknown Directory")
+                                    if self.filename == "untitled.txt" {
+                                        "no directory"
+                                    } else {
+                                        std::path::Path::new(&self.filename)
+                                            .parent()
+                                            .and_then(|p| p.file_name())
+                                            .and_then(|n| n.to_str())
+                                            .unwrap_or("Unknown Directory")
+                                    }
                                 ))
                                 .state(&format!(
                                     "Working on {}",
