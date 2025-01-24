@@ -31,8 +31,22 @@ struct MyApp {
 
 impl MyApp {
     fn new(initial_file: Option<String>) -> Self {
-        let mut discord = DiscordIpcClient::new("1332013100097863780").unwrap();
-        let _ = discord.connect();
+        println!("Initializing Discord RPC...");
+        let mut discord = match DiscordIpcClient::new("1332013100097863780") {
+            Ok(client) => {
+                println!("Discord client created successfully");
+                client
+            }
+            Err(e) => {
+                println!("Failed to create Discord client: {:?}", e);
+                panic!("Discord client creation failed");
+            }
+        };
+
+        match discord.connect() {
+            Ok(_) => println!("Connected to Discord successfully"),
+            Err(e) => println!("Failed to connect to Discord: {:?}", e),
+        }
 
         let start_time = SystemTime::now()
             .duration_since(SystemTime::UNIX_EPOCH)
@@ -75,6 +89,8 @@ impl MyApp {
 
     fn update_discord_presence(&mut self) {
         if let Some(discord) = &mut self.discord {
+            println!("Updating Discord presence...");
+
             let details = match self.current_view {
                 ViewType::Home => "On Home Screen",
                 ViewType::Editor => {
@@ -97,6 +113,9 @@ impl MyApp {
             } else {
                 "No file open".to_string()
             };
+
+            println!("Setting activity - Details: {}, State: {}", details, state);
+
             let kkv = crate::consts::versioninfo::VERSION;
             let version_text = format!("Kokona Text Editor version {}", kkv);
             let activity = activity::Activity::new()
@@ -109,11 +128,21 @@ impl MyApp {
                 )
                 .timestamps(activity::Timestamps::new().start(self.start_time.try_into().unwrap()));
 
-            let _ = discord.set_activity(activity);
+            match discord.set_activity(activity) {
+                Ok(_) => println!("Successfully set Discord activity"),
+                Err(e) => {
+                    println!("Failed to set Discord activity: {:?}", e);
+                    println!("Attempting to reconnect...");
+                    if let Err(e) = discord.connect() {
+                        println!("Reconnection failed: {:?}", e);
+                    }
+                }
+            }
+        } else {
+            println!("Discord client is None");
         }
     }
 }
-
 impl App for MyApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut Frame) {
         self.update_discord_presence();
