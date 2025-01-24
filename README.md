@@ -5,7 +5,7 @@ a multipurpose simple text editor written with egui and rust.
 - editing text
 - file open/save/close
 - searching
-- syntax highlighting
+- syntax highlighting using Syntect
 
 ## buggies (inevitable)
 - Want to report a bug? Submit an issue!
