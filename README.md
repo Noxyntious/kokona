@@ -4,19 +4,17 @@ a multipurpose simple text editor written with egui and rust.
 ## current features
 - editing text
 - file open/save/close
-- search
-
-## planned features
-- syntax highlighting (added in upstream and upcoming 0.3)
+- searching
+- syntax highlighting
 
 ## buggies (inevitable)
-- line and col counters are a little wonky
+- Want to report a bug? Submit an issue!
 
 ## install
 - Stable builds: Download from Releases
 - Upstream builds: Download from Actions
 
-- Have Rust installed and want to build yourself? 
+- Have Rust installed and want to build yourself?
 `$ cargo install --git https://github.com/Noxyntious/kokona`
 
 ### why is it called "Kokona"?
