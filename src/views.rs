@@ -605,7 +605,7 @@ pub fn editor_view(
                             } else {
                                 layout_job.append(string, 0.0, egui::TextFormat::default());
                             }
-
+                            layout_job.wrap.max_width = wrap_width;
                             ui.fonts(|f| f.layout_job(layout_job))
                         };
 

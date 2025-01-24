@@ -3,6 +3,7 @@
 pub mod consts;
 mod views;
 use clap::Parser;
+use discord_rich_presence::{DiscordIpc, DiscordIpcClient};
 use eframe::{egui, App, Frame, NativeOptions};
 use std::sync::atomic::Ordering;
 use views::ViewType;
@@ -21,6 +22,8 @@ struct MyApp {
     show_confirm_dialog: bool,
     is_modified: bool,
     initial_file: Option<String>,
+    discord: Option<DiscordIpcClient>,
+    start_timestamp: i64,
 }
 
 impl App for MyApp {
@@ -32,6 +35,16 @@ impl App for MyApp {
                     self.filename = file_path;
                     self.opened = content;
                     ctx.send_viewport_cmd(egui::ViewportCommand::Title("Kokona".into()));
+
+                    if let Some(discord) = &mut self.discord {
+                        discord
+                            .set_activity(
+                                discord_rich_presence::activity::Activity::new()
+                                    .state("Editing")
+                                    .details(&self.filename),
+                            )
+                            .ok();
+                    }
                 }
                 Err(e) => {
                     rfd::MessageDialog::new()
@@ -83,12 +96,27 @@ impl App for MyApp {
         }
 
         match self.current_view {
-            ViewType::Home => views::home_view(
-                ctx,
-                &mut self.current_view,
-                &mut self.filename,
-                &mut self.opened,
-            ),
+            ViewType::Home => {
+                views::home_view(
+                    ctx,
+                    &mut self.current_view,
+                    &mut self.filename,
+                    &mut self.opened,
+                );
+                if let Some(discord) = &mut self.discord {
+                    discord
+                        .set_activity(
+                            discord_rich_presence::activity::Activity::new()
+                                .state("In menu")
+                                .details("Idling")
+                                .timestamps(
+                                    discord_rich_presence::activity::Timestamps::new()
+                                        .start(self.start_timestamp),
+                                ),
+                        )
+                        .ok();
+                }
+            }
             ViewType::Editor => {
                 let modified = views::editor_view(
                     ctx,
@@ -98,6 +126,32 @@ impl App for MyApp {
                 );
                 if modified {
                     self.is_modified = true;
+                }
+                if let Some(discord) = &mut self.discord {
+                    discord
+                        .set_activity(
+                            discord_rich_presence::activity::Activity::new()
+                                .details(&format!(
+                                    "In {}",
+                                    std::path::Path::new(&self.filename)
+                                        .parent()
+                                        .and_then(|p| p.file_name())
+                                        .and_then(|n| n.to_str())
+                                        .unwrap_or("Unknown Directory")
+                                ))
+                                .state(&format!(
+                                    "Working on {}",
+                                    std::path::Path::new(&self.filename)
+                                        .file_name()
+                                        .and_then(|n| n.to_str())
+                                        .unwrap_or(&self.filename)
+                                ))
+                                .timestamps(
+                                    discord_rich_presence::activity::Timestamps::new()
+                                        .start(self.start_timestamp),
+                                ),
+                        )
+                        .ok();
                 }
             }
         }
@@ -116,6 +170,9 @@ impl App for MyApp {
 fn main() -> Result<(), eframe::Error> {
     let cli = Cli::parse();
 
+    let mut discord = DiscordIpcClient::new("1332264064025362493").unwrap();
+    discord.connect().ok();
+
     let options = NativeOptions {
         vsync: true,
         multisampling: 4,
@@ -125,6 +182,11 @@ fn main() -> Result<(), eframe::Error> {
 
     let mut app = MyApp::default();
     app.initial_file = cli.file;
+    app.discord = Some(discord);
+    app.start_timestamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs() as i64;
 
     eframe::run_native("Kokona", options, Box::new(move |_cc| Ok(Box::new(app))))
 }
