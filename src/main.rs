@@ -35,7 +35,6 @@ impl App for MyApp {
                     self.filename = file_path;
                     self.opened = content;
                     ctx.send_viewport_cmd(egui::ViewportCommand::Title("Kokona".into()));
-
                     if let Some(discord) = &mut self.discord {
                         discord
                             .set_activity(

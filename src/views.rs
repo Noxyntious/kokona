@@ -604,31 +604,76 @@ pub fn editor_view(
                                 let highlights = editor_state.get_or_update_highlights(string);
                                 let mut last_end = 0;
 
-                                let search_highlights =
+                                let (search_highlights, current_match) =
                                     if let Some(search_state) = SEARCH_STATE.as_ref() {
                                         if search_state.open {
-                                            &search_state.matches[..]
+                                            (
+                                                &search_state.matches[..],
+                                                Some(search_state.current_match),
+                                            )
                                         } else {
-                                            &[][..]
+                                            (&[][..], None)
                                         }
                                     } else {
-                                        &[][..]
+                                        (&[][..], None)
                                     };
 
                                 for (format, text) in highlights {
                                     let text_start = last_end;
                                     let text_end = text_start + text.len();
 
-                                    let mut format = format.clone();
+                                    let format = format.clone();
+
+                                    let mut processed = false;
                                     // Apply search highlighting if needed
-                                    if search_highlights.iter().any(|&(s, e)| {
-                                        (s <= text_start && text_start < e)
-                                            || (s < text_end && text_end <= e)
-                                    }) {
-                                        format.background = egui::Color32::from_rgb(255, 255, 0);
+                                    for (idx, &(s, e)) in search_highlights.iter().enumerate() {
+                                        if s >= text_start && e <= text_end {
+                                            let relative_start = s - text_start;
+                                            let relative_end = e - text_start;
+
+                                            // Add text before highlight
+                                            if relative_start > 0 {
+                                                layout_job.append(
+                                                    &text[..relative_start],
+                                                    0.0,
+                                                    format.clone(),
+                                                );
+                                            }
+
+                                            // Add highlighted text with different colors for current match
+                                            let mut highlight_format = format.clone();
+                                            highlight_format.background =
+                                                if Some(idx) == current_match {
+                                                    // Current match highlight - bright yellow
+                                                    egui::Color32::from_rgb(255, 255, 0)
+                                                } else {
+                                                    // Other matches highlight - darker yellow
+                                                    egui::Color32::from_rgb(180, 180, 0)
+                                                };
+                                            layout_job.append(
+                                                &text[relative_start..relative_end],
+                                                0.0,
+                                                highlight_format,
+                                            );
+
+                                            // Add text after highlight
+                                            if relative_end < text.len() {
+                                                layout_job.append(
+                                                    &text[relative_end..],
+                                                    0.0,
+                                                    format.clone(),
+                                                );
+                                            }
+
+                                            processed = true;
+                                            break;
+                                        }
                                     }
 
-                                    layout_job.append(&text, 0.0, format);
+                                    if !processed {
+                                        layout_job.append(&text, 0.0, format);
+                                    }
+
                                     last_end = text_end;
                                 }
                             } else {
