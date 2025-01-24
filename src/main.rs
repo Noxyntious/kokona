@@ -14,7 +14,7 @@ use views::WAS_MODIFIED;
 struct Cli {
     file: Option<String>,
 }
-#[derive(Default)]
+
 struct MyApp {
     current_view: ViewType,
     opened: String,
@@ -24,6 +24,9 @@ struct MyApp {
     initial_file: Option<String>,
     discord: Option<DiscordIpcClient>,
     start_time: u64,
+    fps: f32,
+    last_time: std::time::Instant,
+    fps_history: Vec<f32>,
 }
 
 impl MyApp {
@@ -45,7 +48,29 @@ impl MyApp {
             initial_file,
             discord: Some(discord),
             start_time,
+            fps: 0.0,
+            last_time: std::time::Instant::now(),
+            fps_history: Vec::with_capacity(100),
         }
+    }
+    fn ui(&mut self, ctx: &egui::Context) {
+        let now = std::time::Instant::now();
+        let frame_time = (now - self.last_time).as_secs_f32();
+        self.last_time = now;
+
+        self.fps_history.push(1.0 / frame_time);
+        if self.fps_history.len() > 100 {
+            self.fps_history.remove(0);
+        }
+
+        self.fps = self.fps_history.iter().sum::<f32>() / self.fps_history.len() as f32;
+
+        egui::Window::new("FPS")
+            .fixed_pos(egui::pos2(5.0, 5.0))
+            .resizable(false)
+            .show(ctx, |ui| {
+                ui.label(format!("FPS: {:.1}", self.fps));
+            });
     }
 
     fn update_discord_presence(&mut self) {
@@ -92,6 +117,7 @@ impl MyApp {
 impl App for MyApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut Frame) {
         self.update_discord_presence();
+        //        self.ui(ctx); // uncommenting this shows you an FPS counter. this is debug functionality
         if let Some(file_path) = self.initial_file.take() {
             match std::fs::read_to_string(&file_path) {
                 Ok(content) => {
@@ -176,7 +202,6 @@ impl App for MyApp {
         // uncommenting this allows you to hit "Tab" to switch views
         // this is debug behavior that should not be included in release builds
         // except that it was in v0.1. oh well
-
     }
 }
 

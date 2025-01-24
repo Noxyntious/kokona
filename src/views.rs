@@ -28,7 +28,7 @@ pub struct EditorState {
     syntax: Option<SyntaxReference>,
     theme: Theme,
     cached_highlights: Vec<(egui::TextFormat, String)>,
-    last_text: String,
+    last_text: String, // rhythm game waiter be like: this is your last dish
 }
 
 impl EditorState {
@@ -58,11 +58,25 @@ impl EditorState {
 
     pub fn get_or_update_highlights(&mut self, text: &str) -> &Vec<(egui::TextFormat, String)> {
         if self.last_text != text {
+            self.last_text = text.to_string();
+
             if let Some(syntax) = &self.syntax {
                 let mut h = HighlightLines::new(syntax, &self.theme);
                 let mut highlights = Vec::new();
 
-                for line in LinesWithEndings::from(text) {
+                for (i, line) in LinesWithEndings::from(text).enumerate() {
+                    if i > 1000 {
+                        let processed_len = highlights
+                            .iter()
+                            .map(|pair: &(egui::TextFormat, String)| pair.1.len())
+                            .sum::<usize>();
+                        highlights.push((
+                            egui::TextFormat::default(),
+                            text[processed_len..].to_string(),
+                        ));
+                        break;
+                    }
+
                     if let Ok(line_highlights) = h.highlight_line(line, &self.ps) {
                         for (style, text) in line_highlights {
                             let format = egui::TextFormat {
@@ -80,19 +94,24 @@ impl EditorState {
                 }
 
                 self.cached_highlights = highlights;
-                self.last_text = text.to_string();
             } else {
-                self.cached_highlights = vec![(egui::TextFormat::default(), text.to_string())];
-                self.last_text = text.to_string();
+                self.cached_highlights = vec![(
+                    egui::TextFormat {
+                        font_id: egui::FontId::monospace(12.0),
+                        ..Default::default()
+                    },
+                    text.to_string(),
+                )];
             }
         }
+
         &self.cached_highlights
     }
 }
-
 pub static WAS_MODIFIED: AtomicBool = AtomicBool::new(false);
 static mut SEARCH_STATE: Option<SearchState> = None;
 static mut EDITOR_STATE: Option<EditorState> = None;
+static mut CACHED_LINE_NUMBERS: Option<(String, usize)> = None;
 
 impl SearchState {
     fn find_matches(&mut self, text: &str) {
@@ -484,21 +503,55 @@ pub fn editor_view(
                     let text_layout = ui.available_size_before_wrap();
                     let chars_per_line = (text_layout.x / 8.0).max(1.0) as usize;
 
-                    let line_numbers = (1..=lines)
-                        .flat_map(|i| {
-                            let line = text.lines().nth(i - 1).unwrap_or("");
-                            let wrap_count = if chars_per_line > 0 {
-                                (line.len() + chars_per_line - 1) / chars_per_line
+                    let line_numbers = unsafe {
+                        let current_lines = text.split('\n').count().max(1);
+                        let text_layout = ui.available_size_before_wrap();
+                        let chars_per_line = (text_layout.x / 8.0).max(1.0) as usize;
+
+                        if let Some((cached, len)) = &CACHED_LINE_NUMBERS {
+                            if len == &current_lines {
+                                cached.clone()
                             } else {
-                                1
-                            };
-                            std::iter::once(i.to_string()).chain(
-                                std::iter::repeat("-".to_string())
-                                    .take(wrap_count.saturating_sub(1)),
-                            )
-                        })
-                        .collect::<Vec<_>>()
-                        .join("\n");
+                                let new_numbers = (1..=current_lines)
+                                    .flat_map(|i| {
+                                        let line = text.lines().nth(i - 1).unwrap_or("");
+                                        let wrap_count = if chars_per_line > 0 {
+                                            (line.len() + chars_per_line - 1) / chars_per_line
+                                        } else {
+                                            1
+                                        };
+                                        std::iter::once(i.to_string()).chain(
+                                            std::iter::repeat("-".to_string())
+                                                .take(wrap_count.saturating_sub(1)),
+                                        )
+                                    })
+                                    .collect::<Vec<_>>()
+                                    .join("\n");
+
+                                CACHED_LINE_NUMBERS = Some((new_numbers.clone(), current_lines));
+                                new_numbers
+                            }
+                        } else {
+                            let new_numbers = (1..=current_lines)
+                                .flat_map(|i| {
+                                    let line = text.lines().nth(i - 1).unwrap_or("");
+                                    let wrap_count = if chars_per_line > 0 {
+                                        (line.len() + chars_per_line - 1) / chars_per_line
+                                    } else {
+                                        1
+                                    };
+                                    std::iter::once(i.to_string()).chain(
+                                        std::iter::repeat("-".to_string())
+                                            .take(wrap_count.saturating_sub(1)),
+                                    )
+                                })
+                                .collect::<Vec<_>>()
+                                .join("\n");
+
+                            CACHED_LINE_NUMBERS = Some((new_numbers.clone(), current_lines));
+                            new_numbers
+                        }
+                    };
 
                     ui.add(
                         egui::TextEdit::multiline(&mut line_numbers.as_str())
