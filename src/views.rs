@@ -591,10 +591,11 @@ pub fn editor_view(
                             .horizontal_align(egui::Align::RIGHT),
                     );
 
-                    let text_edit = egui::TextEdit::multiline(text)
+                    let mut text_edit = egui::TextEdit::multiline(text)
                         .desired_width(available_width - 50.0)
                         .min_size(egui::vec2(available_width - 50.0, available_height))
-                        .font(egui::TextStyle::Monospace);
+                        .font(egui::TextStyle::Monospace)
+                        .lock_focus(true);
 
                     let response = unsafe {
                         let mut layouter = |ui: &egui::Ui, string: &str, wrap_width: f32| {
@@ -684,6 +685,15 @@ pub fn editor_view(
                         };
 
                         let response = ui.add(text_edit.layouter(&mut layouter));
+                        if response.has_focus() && ui.input(|i| i.key_pressed(egui::Key::Tab)) {
+                            let cursor_pos = text.len();
+                            text.insert_str(cursor_pos, "    ");
+                            WAS_MODIFIED.store(true, Ordering::SeqCst);
+                            ctx.send_viewport_cmd(egui::ViewportCommand::Title(
+                                "Kokona | MODIFIED".into(),
+                            ));
+                            response.request_focus();
+                        }
                         if response.changed() {
                             WAS_MODIFIED.store(true, Ordering::SeqCst);
                             ctx.send_viewport_cmd(egui::ViewportCommand::Title(
@@ -711,7 +721,7 @@ pub fn editor_view(
 fn calculate_cursor_position(text: &str) -> (usize, usize) {
     let mut line = 1;
     let mut col = 1;
-
+    // this still sucks, please someone help
     let char_idx = text.len();
     for (_i, c) in text[..char_idx].chars().enumerate() {
         if c == '\n' {
