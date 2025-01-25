@@ -1,9 +1,21 @@
 use eframe::egui;
+use once_cell::sync::OnceCell;
+use serde::Deserialize;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::{Duration, Instant};
 use syntect::easy::HighlightLines;
 use syntect::highlighting::{Theme, ThemeSet};
 use syntect::parsing::{SyntaxReference, SyntaxSet};
 use syntect::util::LinesWithEndings;
+
+static UPDATE_CHECK_DONE: AtomicBool = AtomicBool::new(false);
+static SHOULD_SHOW_UPDATE: OnceCell<(String, String)> = OnceCell::new();
+static UPDATE_DIALOG_SHOWN: AtomicBool = AtomicBool::new(false);
+
+#[derive(Deserialize)]
+struct GithubRelease {
+    tag_name: String,
+}
 
 #[derive(Default)]
 pub enum ViewType {
@@ -27,8 +39,79 @@ pub struct EditorState {
     theme: Theme,
     cached_highlights: Vec<(egui::TextFormat, String)>,
     last_text: String, // rhythm game waiter be like: this is your last dish
+    last_update: Instant,
+    is_typing: bool,
 }
+fn compare_versions(current: &str, latest: &str) -> bool {
+    println!(
+        "Comparing versions - Current: {}, Latest: {}",
+        current, latest
+    );
 
+    let current_parts: Vec<String> = current.split('.').map(|s| s.to_string()).collect();
+    let latest_parts: Vec<String> = latest.split('.').map(|s| s.to_string()).collect();
+
+    let current_parts: Vec<u32> = current_parts
+        .iter()
+        .enumerate()
+        .map(|(i, s)| {
+            if i == 2 {
+                s.chars()
+                    .next()
+                    .unwrap_or('0')
+                    .to_string()
+                    .parse()
+                    .unwrap_or(0)
+            } else {
+                s.parse().unwrap_or(0)
+            }
+        })
+        .collect();
+
+    let latest_parts: Vec<u32> = latest_parts
+        .iter()
+        .enumerate()
+        .map(|(i, s)| {
+            if i == 2 {
+                // for the third number, only take the first character
+                // if we dont do this it will break the updater if youre running a dev build like 0.3.3-dev
+                s.chars()
+                    .next()
+                    .unwrap_or('0')
+                    .to_string()
+                    .parse()
+                    .unwrap_or(0)
+            } else {
+                s.parse().unwrap_or(0)
+            }
+        })
+        .collect();
+
+    println!(
+        "Parsed versions - Current: {:?}, Latest: {:?}",
+        current_parts, latest_parts
+    );
+
+    for i in 0..3 {
+        let current_num = current_parts.get(i).unwrap_or(&0);
+        let latest_num = latest_parts.get(i).unwrap_or(&0);
+
+        println!(
+            "Comparing position {} - Current: {}, Latest: {}",
+            i, current_num, latest_num
+        );
+
+        if latest_num > current_num {
+            println!("Update needed!");
+            return true;
+        } else if latest_num < current_num {
+            println!("Current version is newer!");
+            return false;
+        }
+    }
+    println!("Versions are equal");
+    false
+}
 impl EditorState {
     pub fn new() -> Self {
         let ps = SyntaxSet::load_defaults_newlines();
@@ -41,6 +124,8 @@ impl EditorState {
             theme,
             cached_highlights: Vec::new(),
             last_text: String::new(),
+            last_update: Instant::now(),
+            is_typing: false,
         }
     }
 
@@ -56,24 +141,31 @@ impl EditorState {
     pub fn get_or_update_highlights(&mut self, text: &str) -> &Vec<(egui::TextFormat, String)> {
         if self.last_text != text {
             self.last_text = text.to_string();
+            self.is_typing = true;
+            self.last_update = Instant::now();
 
+            let line_count = text.matches('\n').count() + 1;
+            //println!("Line count: {}", line_count);
+
+            if line_count > 500 {
+                //println!("Large file detected, using plain text");
+                // if file exceeds 500 lines, disable real-time highlighting for performance
+                self.cached_highlights = vec![(
+                    egui::TextFormat {
+                        font_id: egui::FontId::monospace(12.0),
+                        ..Default::default()
+                    },
+                    text.to_string(),
+                )];
+                return &self.cached_highlights;
+            }
+
+            // Only reach this code for small files
             if let Some(syntax) = &self.syntax {
                 let mut h = HighlightLines::new(syntax, &self.theme);
                 let mut highlights = Vec::new();
 
-                for (i, line) in LinesWithEndings::from(text).enumerate() {
-                    if i > 1000 {
-                        let processed_len = highlights
-                            .iter()
-                            .map(|pair: &(egui::TextFormat, String)| pair.1.len())
-                            .sum::<usize>();
-                        highlights.push((
-                            egui::TextFormat::default(),
-                            text[processed_len..].to_string(),
-                        ));
-                        break;
-                    }
-
+                for line in LinesWithEndings::from(text) {
                     if let Ok(line_highlights) = h.highlight_line(line, &self.ps) {
                         for (style, text) in line_highlights {
                             let format = egui::TextFormat {
@@ -102,7 +194,79 @@ impl EditorState {
             }
         }
 
+        // Check if we should update syntax highlighting for large files
+        if self.is_typing && self.last_update.elapsed() >= Duration::from_millis(500) {
+            let line_count = self.last_text.matches('\n').count() + 1;
+            if line_count > 500 {
+                self.is_typing = false;
+                let current_text = self.last_text.clone();
+                self.update_highlights(&current_text);
+            }
+        }
+
         &self.cached_highlights
+    }
+
+    pub fn force_highlight_update(&mut self) {
+        self.is_typing = false;
+        let current_text = self.last_text.clone();
+        if let Some(syntax) = &self.syntax {
+            let mut h = HighlightLines::new(syntax, &self.theme);
+            let mut highlights = Vec::new();
+
+            for line in LinesWithEndings::from(&current_text) {
+                if let Ok(line_highlights) = h.highlight_line(line, &self.ps) {
+                    for (style, text) in line_highlights {
+                        let format = egui::TextFormat {
+                            color: egui::Color32::from_rgb(
+                                style.foreground.r,
+                                style.foreground.g,
+                                style.foreground.b,
+                            ),
+                            font_id: egui::FontId::monospace(12.0),
+                            ..Default::default()
+                        };
+                        highlights.push((format, text.to_string()));
+                    }
+                }
+            }
+
+            self.cached_highlights = highlights;
+        }
+    }
+
+    fn update_highlights(&mut self, text: &str) {
+        if let Some(syntax) = &self.syntax {
+            let mut h = HighlightLines::new(syntax, &self.theme);
+            let mut highlights = Vec::new();
+
+            for line in LinesWithEndings::from(text) {
+                if let Ok(line_highlights) = h.highlight_line(line, &self.ps) {
+                    for (style, text) in line_highlights {
+                        let format = egui::TextFormat {
+                            color: egui::Color32::from_rgb(
+                                style.foreground.r,
+                                style.foreground.g,
+                                style.foreground.b,
+                            ),
+                            font_id: egui::FontId::monospace(12.0),
+                            ..Default::default()
+                        };
+                        highlights.push((format, text.to_string()));
+                    }
+                }
+            }
+
+            self.cached_highlights = highlights;
+        } else {
+            self.cached_highlights = vec![(
+                egui::TextFormat {
+                    font_id: egui::FontId::monospace(12.0),
+                    ..Default::default()
+                },
+                text.to_string(),
+            )];
+        }
     }
 }
 pub static WAS_MODIFIED: AtomicBool = AtomicBool::new(false);
@@ -207,6 +371,11 @@ pub fn show_top_panel(
                                 println!("File saved successfully to: {}", path.display());
                                 WAS_MODIFIED.store(false, Ordering::SeqCst);
                             }
+                            unsafe {
+                                if let Some(editor_state) = EDITOR_STATE.as_mut() {
+                                    editor_state.force_highlight_update();
+                                }
+                            }
                             *filename = path.display().to_string();
                             ctx.send_viewport_cmd(egui::ViewportCommand::Title("Kokona".into()));
                         }
@@ -234,6 +403,11 @@ pub fn show_top_panel(
                         } else {
                             println!("File saved successfully to: {}", path.display());
                             WAS_MODIFIED.store(false, Ordering::SeqCst);
+                        }
+                        unsafe {
+                            if let Some(editor_state) = EDITOR_STATE.as_mut() {
+                                editor_state.force_highlight_update();
+                            }
                         }
                         *filename = path.display().to_string();
                         ctx.send_viewport_cmd(egui::ViewportCommand::Title("Kokona".into()));
@@ -305,7 +479,99 @@ pub fn home_view(
     text: &mut String,
 ) {
     let mut should_create_new = false; // flag for new file
+    if let Some((current_version, latest_version)) = SHOULD_SHOW_UPDATE.get() {
+        if !UPDATE_DIALOG_SHOWN.load(Ordering::SeqCst) {
+            egui::Window::new("Update Available")
+                .collapsible(false)
+                .resizable(false)
+                .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0))
+                .show(ctx, |ui| {
+                    ui.vertical_centered(|ui| {
+                        ui.label(format!(
+                            "A new version of Kokona is available!\nCurrent: v{}\nLatest: v{}",
+                            current_version, latest_version
+                        ));
+                        ui.add_space(8.0);
+                        ui.horizontal(|ui| {
+                            ui.with_layout(
+                                egui::Layout::right_to_left(egui::Align::Center),
+                                |ui| {
+                                    if ui.button("Open Download Page").clicked() {
+                                        if let Err(e) = open::that(
+                                            "https://github.com/Noxyntious/kokona/releases/latest",
+                                        ) {
+                                            println!("Failed to open URL: {}", e);
+                                        }
+                                        UPDATE_DIALOG_SHOWN.store(true, Ordering::SeqCst);
+                                    }
+                                    if ui.button("Dismiss").clicked() {
+                                        UPDATE_DIALOG_SHOWN.store(true, Ordering::SeqCst);
+                                    }
+                                },
+                            );
+                        });
+                    });
+                });
+        }
+    }
 
+    // Delayed update check
+    if !UPDATE_CHECK_DONE.load(Ordering::SeqCst) {
+        UPDATE_CHECK_DONE.store(true, Ordering::SeqCst);
+
+        // Schedule the update check after a short delay
+        let ctx_clone = ctx.clone();
+        std::thread::spawn(move || {
+            // Wait for 2 seconds to let the application load
+            std::thread::sleep(std::time::Duration::from_millis(500));
+
+            std::thread::Builder::new()
+                .name("update-checker".to_string())
+                .spawn(move || {
+                    let runtime = tokio::runtime::Runtime::new().unwrap();
+                    runtime.block_on(async {
+                        let client = reqwest::Client::new();
+                        match client
+                            .get("https://api.github.com/repos/Noxyntious/kokona/releases/latest")
+                            .header("User-Agent", "kokona-update-checker")
+                            .send()
+                            .await
+                        {
+                            Ok(response) => {
+                                match response.text().await {
+                                    Ok(text) => {
+                                        match serde_json::from_str::<GithubRelease>(&text) {
+                                            Ok(release) => {
+                                                let latest_version = release
+                                                    .tag_name
+                                                    .trim_start_matches('v')
+                                                    .to_string();
+                                                let current_version =
+                                                    crate::consts::versioninfo::VERSION.to_string();
+
+                                                if compare_versions(
+                                                    &current_version,
+                                                    &latest_version,
+                                                ) {
+                                                    let _ = SHOULD_SHOW_UPDATE
+                                                        .set((current_version, latest_version));
+                                                    ctx_clone.request_repaint();
+                                                    // Request UI update
+                                                }
+                                            }
+                                            Err(e) => println!("Failed to parse JSON: {}", e),
+                                        }
+                                    }
+                                    Err(e) => println!("Failed to get response text: {}", e),
+                                }
+                            }
+                            Err(e) => println!("Failed to get response from GitHub: {}", e),
+                        }
+                    });
+                })
+                .expect("Failed to spawn update checker thread");
+        });
+    }
     egui::CentralPanel::default().show(ctx, |ui| {
         ui.add_space(15.0);
         ui.horizontal(|ui| {
@@ -444,6 +710,11 @@ pub fn editor_view(
                 } else {
                     println!("File saved successfully to: {}", path.display());
                     WAS_MODIFIED.store(false, Ordering::SeqCst);
+                }
+                unsafe {
+                    if let Some(editor_state) = EDITOR_STATE.as_mut() {
+                        editor_state.force_highlight_update();
+                    }
                 }
                 *filename = path.display().to_string();
                 ctx.send_viewport_cmd(egui::ViewportCommand::Title("Kokona".into()));
@@ -739,7 +1010,7 @@ fn show_bottom_status_bar(ctx: &egui::Context, line: usize, col: usize, text: &s
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             ui.add_space(5.0);
             ui.label(format!(
-                "Line {}, Column {} | Characters: {}",
+                "{} lines, {} columns | Characters: {}",
                 line,
                 col,
                 text.len()
