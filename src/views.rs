@@ -317,6 +317,14 @@ impl SearchState {
         }
     }
 }
+static mut GIT_RESULT_OPEN: bool = false;
+static mut GIT_RESULT: Option<Result<std::process::Output, std::io::Error>> = None;
+static mut ABOUT_OPEN: bool = false;
+
+static mut COMMIT_WINDOW_OPEN: bool = false;
+static mut COMMIT_MESSAGE: String = String::new();
+static mut COMMIT_RESULT: Option<Result<std::process::Output, std::io::Error>> = None;
+
 pub fn show_top_panel(
     ctx: &egui::Context,
     filename: &mut String,
@@ -441,6 +449,32 @@ pub fn show_top_panel(
                 }
             });
 
+            ui.menu_button("Git", |ui| {
+                if ui.button("Add current file").clicked() {
+                    unsafe {
+                        GIT_RESULT_OPEN = true;
+                        // Get the parent directory of the file
+                        let file_path = std::path::Path::new(&filename);
+                        let parent_dir = file_path.parent().unwrap_or(std::path::Path::new(""));
+
+                        // Create the command with the correct working directory
+                        GIT_RESULT = Some(
+                            std::process::Command::new("git")
+                                .current_dir(parent_dir) // Set working directory to file's location
+                                .arg("add")
+                                .arg(file_path.file_name().unwrap_or_default()) // Use just the filename
+                                .output(),
+                        );
+                    }
+                }
+                if ui.button("Commit").clicked() {
+                    unsafe {
+                        COMMIT_WINDOW_OPEN = true;
+                        COMMIT_MESSAGE.clear(); // Clear any previous message
+                    }
+                    ui.close_menu();
+                }
+            });
             ui.menu_button("Help", |ui| {
                 if ui.button("About").clicked() {
                     unsafe {
@@ -467,6 +501,151 @@ pub fn show_top_panel(
                         ui.add_space(8.0);
                         ui.label("Written by eri");
                     });
+            }
+
+            unsafe {
+                if GIT_RESULT_OPEN {
+                    if let Some(result) = &GIT_RESULT {
+                        match result {
+                            Ok(output) => {
+                                let stdout = String::from_utf8_lossy(&output.stdout);
+                                let stderr = String::from_utf8_lossy(&output.stderr);
+
+                                egui::Window::new("Git Add Result")
+                                    .open(&mut GIT_RESULT_OPEN)
+                                    .collapsible(false)
+                                    .resizable(false)
+                                    .fixed_size([300.0, 60.0])
+                                    .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0))
+                                    .show(ctx, |ui| {
+                                        if !stdout.is_empty() {
+                                            ui.label(format!("Output: {}", stdout));
+                                        }
+                                        if !stderr.is_empty() {
+                                            ui.label(format!("Error: {}", stderr));
+                                        }
+                                        if stdout.is_empty() && stderr.is_empty() {
+                                            ui.label("File added successfully.");
+                                        }
+                                        ui.with_layout(
+                                            egui::Layout::right_to_left(egui::Align::RIGHT),
+                                            |ui| {
+                                                if ui.button("Close").clicked() {
+                                                    GIT_RESULT_OPEN = false;
+                                                }
+                                            },
+                                        );
+                                    });
+                            }
+                            Err(e) => {
+                                egui::Window::new("Git Add Error")
+                                    .open(&mut GIT_RESULT_OPEN)
+                                    .collapsible(false)
+                                    .resizable(false)
+                                    .fixed_size([300.0, 60.0])
+                                    .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0))
+                                    .show(ctx, |ui| {
+                                        ui.label(format!("Error: {}", e));
+                                        ui.with_layout(
+                                            egui::Layout::right_to_left(egui::Align::RIGHT),
+                                            |ui| {
+                                                if ui.button("Close").clicked() {
+                                                    GIT_RESULT_OPEN = false;
+                                                }
+                                            },
+                                        );
+                                    });
+                            }
+                        }
+                    }
+                }
+            }
+            unsafe {
+                if COMMIT_WINDOW_OPEN {
+                    egui::Window::new("Git Commit")
+                        .open(&mut COMMIT_WINDOW_OPEN)
+                        .collapsible(false)
+                        .resizable(false)
+                        .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0))
+                        .show(ctx, |ui| {
+                            ui.label("Enter commit message:");
+                            ui.text_edit_singleline(&mut COMMIT_MESSAGE);
+                            ui.add_space(8.0);
+                            ui.horizontal(|ui| {
+                                ui.with_layout(
+                                    egui::Layout::right_to_left(egui::Align::Center),
+                                    |ui| {
+                                        if ui.button("Commit").clicked() {
+                                            let file_path = std::path::Path::new(&filename);
+                                            let parent_dir = file_path
+                                                .parent()
+                                                .unwrap_or(std::path::Path::new(""));
+
+                                            COMMIT_RESULT = Some(
+                                                std::process::Command::new("git")
+                                                    .current_dir(parent_dir)
+                                                    .arg("commit")
+                                                    .arg("-m")
+                                                    .arg(&COMMIT_MESSAGE)
+                                                    .output(),
+                                            );
+                                            COMMIT_WINDOW_OPEN = false;
+                                        }
+                                        if ui.button("Cancel").clicked() {
+                                            COMMIT_WINDOW_OPEN = false;
+                                        }
+                                    },
+                                );
+                            });
+                        });
+                }
+
+                // Show commit result if available
+                if let Some(result) = &COMMIT_RESULT {
+                    match result {
+                        Ok(output) => {
+                            let stdout = String::from_utf8_lossy(&output.stdout);
+                            let stderr = String::from_utf8_lossy(&output.stderr);
+
+                            egui::Window::new("Git Commit Result")
+                                .collapsible(false)
+                                .resizable(false)
+                                .fixed_size([350.0, 60.0])
+                                .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0))
+                                .show(ctx, |ui| {
+                                    if !stdout.is_empty() {
+                                        ui.label(format!("Output: {}", stdout));
+                                    }
+                                    if !stderr.is_empty() {
+                                        ui.label(format!("Error: {}", stderr));
+                                    }
+                                    if stdout.is_empty() && stderr.is_empty() {
+                                        ui.label("Commit successful.");
+                                    }
+                                    ui.with_layout(
+                                        egui::Layout::right_to_left(egui::Align::RIGHT),
+                                        |ui| {
+                                            if ui.button("Close").clicked() {
+                                                COMMIT_RESULT = None;
+                                            }
+                                        },
+                                    );
+                                });
+                        }
+                        Err(e) => {
+                            egui::Window::new("Git Commit Error")
+                                .collapsible(false)
+                                .resizable(false)
+                                .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0))
+                                .show(ctx, |ui| {
+                                    ui.label(format!("Error: {}", e));
+                                    if ui.button("Close").clicked() {
+                                        COMMIT_RESULT = None;
+                                    }
+                                });
+                        }
+                    }
+                }
             }
         });
     });
