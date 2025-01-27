@@ -1,12 +1,9 @@
-use crossterm::{
-    cursor, execute,
-    style::{Color, ResetColor, SetForegroundColor},
-    terminal::{self, Clear, ClearType},
-};
+use directories_next::ProjectDirs;
 use eframe::egui;
 use once_cell::sync::OnceCell;
-use serde::Deserialize;
-use std::io::{stdout, Write};
+use serde::{Deserialize, Serialize};
+use std::fs;
+use std::io::Write;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 use syntect::easy::HighlightLines;
@@ -27,6 +24,11 @@ static mut TERMINAL_OPEN: bool = false;
 #[derive(Deserialize)]
 struct GithubRelease {
     tag_name: String,
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+pub struct EditorSettings {
+    pub font_size: f32, // Just one sample setting
 }
 
 #[derive(Default)]
@@ -164,7 +166,9 @@ impl EditorState {
                 // if file exceeds 500 lines, disable real-time highlighting for performance
                 self.cached_highlights = vec![(
                     egui::TextFormat {
-                        font_id: egui::FontId::monospace(12.0),
+                        font_id: egui::FontId::monospace(unsafe {
+                            SETTINGS.as_ref().map_or(12.0, |s| s.font_size)
+                        }),
                         ..Default::default()
                     },
                     text.to_string(),
@@ -186,7 +190,9 @@ impl EditorState {
                                     style.foreground.g,
                                     style.foreground.b,
                                 ),
-                                font_id: egui::FontId::monospace(12.0),
+                                font_id: egui::FontId::monospace(unsafe {
+                                    SETTINGS.as_ref().map_or(12.0, |s| s.font_size)
+                                }),
                                 ..Default::default()
                             };
                             highlights.push((format, text.to_string()));
@@ -198,7 +204,9 @@ impl EditorState {
             } else {
                 self.cached_highlights = vec![(
                     egui::TextFormat {
-                        font_id: egui::FontId::monospace(12.0),
+                        font_id: egui::FontId::monospace(unsafe {
+                            SETTINGS.as_ref().map_or(12.0, |s| s.font_size)
+                        }),
                         ..Default::default()
                     },
                     text.to_string(),
@@ -235,7 +243,9 @@ impl EditorState {
                                 style.foreground.g,
                                 style.foreground.b,
                             ),
-                            font_id: egui::FontId::monospace(12.0),
+                            font_id: egui::FontId::monospace(unsafe {
+                                SETTINGS.as_ref().map_or(12.0, |s| s.font_size)
+                            }),
                             ..Default::default()
                         };
                         highlights.push((format, text.to_string()));
@@ -261,7 +271,9 @@ impl EditorState {
                                 style.foreground.g,
                                 style.foreground.b,
                             ),
-                            font_id: egui::FontId::monospace(12.0),
+                            font_id: egui::FontId::monospace(unsafe {
+                                SETTINGS.as_ref().map_or(12.0, |s| s.font_size)
+                            }),
                             ..Default::default()
                         };
                         highlights.push((format, text.to_string()));
@@ -273,7 +285,9 @@ impl EditorState {
         } else {
             self.cached_highlights = vec![(
                 egui::TextFormat {
-                    font_id: egui::FontId::monospace(12.0),
+                    font_id: egui::FontId::monospace(unsafe {
+                        SETTINGS.as_ref().map_or(12.0, |s| s.font_size)
+                    }),
                     ..Default::default()
                 },
                 text.to_string(),
@@ -285,7 +299,43 @@ pub static WAS_MODIFIED: AtomicBool = AtomicBool::new(false);
 static mut SEARCH_STATE: Option<SearchState> = None;
 static mut EDITOR_STATE: Option<EditorState> = None;
 static mut CACHED_LINE_NUMBERS: Option<(String, usize)> = None;
+static mut SETTINGS: Option<EditorSettings> = None;
+static mut SETTINGS_WINDOW_OPEN: bool = false;
 
+impl Default for EditorSettings {
+    fn default() -> Self {
+        Self { font_size: 12.0 }
+    }
+}
+impl EditorSettings {
+    pub fn load() -> Self {
+        if let Some(proj_dirs) = ProjectDirs::from("dev", "nijika", "kokona") {
+            let config_dir = proj_dirs.config_dir();
+            let config_file = config_dir.join("settings.json");
+
+            if config_file.exists() {
+                if let Ok(contents) = fs::read_to_string(config_file) {
+                    if let Ok(settings) = serde_json::from_str(&contents) {
+                        return settings;
+                    }
+                }
+            }
+        }
+        Self::default()
+    }
+
+    pub fn save(&self) -> Result<(), Box<dyn std::error::Error>> {
+        if let Some(proj_dirs) = ProjectDirs::from("dev", "nijika", "kokona") {
+            let config_dir = proj_dirs.config_dir();
+            fs::create_dir_all(config_dir)?;
+
+            let config_file = config_dir.join("settings.json");
+            let contents = serde_json::to_string_pretty(self)?;
+            fs::write(config_file, contents)?;
+        }
+        Ok(())
+    }
+}
 impl SearchState {
     fn find_matches(&mut self, text: &str) {
         self.matches.clear();
@@ -331,7 +381,6 @@ impl SearchState {
 }
 static mut GIT_RESULT_OPEN: bool = false;
 static mut GIT_RESULT: Option<Result<std::process::Output, std::io::Error>> = None;
-static mut ABOUT_OPEN: bool = false;
 static mut INSERT_OPEN: bool = false;
 
 static mut COMMIT_WINDOW_OPEN: bool = false;
@@ -434,6 +483,12 @@ pub fn show_top_panel(
                         }
                         *filename = path.display().to_string();
                         ctx.send_viewport_cmd(egui::ViewportCommand::Title("Kokona".into()));
+                    }
+                    ui.close_menu();
+                }
+                if ui.button("Settings").clicked() {
+                    unsafe {
+                        SETTINGS_WINDOW_OPEN = true;
                     }
                     ui.close_menu();
                 }
@@ -610,7 +665,56 @@ pub fn show_top_panel(
                         });
                     });
             }
+            unsafe {
+                if SETTINGS_WINDOW_OPEN {
+                    egui::Window::new("Settings")
+                        .open(&mut SETTINGS_WINDOW_OPEN)
+                        .resizable(false)
+                        .show(ctx, |ui| {
+                            if let Some(settings) = &mut SETTINGS {
+                                ui.vertical(|ui| {
+                                    ui.horizontal(|ui| {
+                                        ui.label("Font Size:");
+                                        let changed = ui
+                                            .add(
+                                                egui::DragValue::new(&mut settings.font_size)
+                                                    .speed(0.5)
+                                                    .clamp_range(8.0..=32.0),
+                                            )
+                                            .changed();
 
+                                        if changed {
+                                            settings.save().unwrap_or_else(|e| {
+                                                println!("Failed to save settings: {}", e);
+                                            });
+                                            // Force highlights refresh
+                                            if let Some(editor_state) = EDITOR_STATE.as_mut() {
+                                                editor_state.cached_highlights.clear();
+                                                editor_state.last_text.clear();
+                                            }
+                                            ctx.request_repaint();
+                                        }
+                                    });
+
+                                    ui.separator();
+
+                                    if ui.button("Reset to Defaults").clicked() {
+                                        *settings = EditorSettings::default();
+                                        settings.save().unwrap_or_else(|e| {
+                                            println!("Failed to save settings: {}", e);
+                                        });
+                                        // Force highlights refresh
+                                        if let Some(editor_state) = EDITOR_STATE.as_mut() {
+                                            editor_state.cached_highlights.clear();
+                                            editor_state.last_text.clear();
+                                        }
+                                        ctx.request_repaint();
+                                    }
+                                });
+                            }
+                        });
+                }
+            }
             unsafe {
                 if GIT_RESULT_OPEN {
                     if let Some(result) = &GIT_RESULT {
@@ -765,6 +869,9 @@ pub fn home_view(
     filename: &mut String,
     text: &mut String,
 ) {
+    unsafe {
+        SETTINGS = Some(EditorSettings::load());
+    }
     let mut should_create_new = false; // flag for new file
     if let Some((current_version, latest_version)) = SHOULD_SHOW_UPDATE.get() {
         if !UPDATE_DIALOG_SHOWN.load(Ordering::SeqCst) {
@@ -1149,14 +1256,20 @@ pub fn editor_view(
 
                     ui.add(
                         egui::TextEdit::multiline(&mut line_numbers.as_str())
-                            .desired_width(35.0)
+                            .desired_width(unsafe {
+                                SETTINGS
+                                    .as_ref()
+                                    .map_or(35.0, |s| 35.0 * (s.font_size / 12.0))
+                            })
                             .min_size(egui::vec2(35.0, available_height))
                             .interactive(false)
-                            .font(egui::TextStyle::Monospace)
+                            .font(egui::FontId::monospace(unsafe {
+                                SETTINGS.as_ref().map_or(12.0, |s| s.font_size)
+                            }))
                             .horizontal_align(egui::Align::RIGHT),
                     );
 
-                    let mut text_edit = egui::TextEdit::multiline(text)
+                    let text_edit = egui::TextEdit::multiline(text)
                         .desired_width(available_width - 50.0)
                         .min_size(egui::vec2(available_width - 50.0, available_height))
                         .font(egui::TextStyle::Monospace)

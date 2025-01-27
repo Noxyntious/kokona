@@ -189,6 +189,5 @@ fn main() -> Result<(), eframe::Error> {
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap()
         .as_secs() as i64;
-
     eframe::run_native("Kokona", options, Box::new(move |_cc| Ok(Box::new(app))))
 }
