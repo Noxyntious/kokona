@@ -1344,7 +1344,6 @@ fn show_bottom_status_bar(
                             TERMINAL_OUTPUT = Some(String::new());
                             TERMINAL_INPUT = Some(String::new());
 
-                            // Get the writer
                             if let Some(pty_pair) = &TERMINAL_PTY {
                                 match pty_pair.master.take_writer() {
                                     Ok(writer) => TERMINAL_WRITER = Some(writer),
@@ -1352,21 +1351,18 @@ fn show_bottom_status_bar(
                                 };
 
                                 let mut cmd = portable_pty::CommandBuilder::new("/bin/sh");
-                                // Set up environment variables for proper encoding
                                 cmd.env("TERM", "dumb");
                                 cmd.env("LANG", "en_US.UTF-8");
                                 cmd.env("LC_ALL", "en_US.UTF-8");
                                 if let Some(parent) = std::path::Path::new(&*filename).parent() {
                                     cmd.cwd(parent);
                                 }
-                                if let Ok(child) = pty_pair.slave.spawn_command(cmd) {
+
+                                if let Ok(_child) = pty_pair.slave.spawn_command(cmd) {
                                     println!("Shell started successfully");
-                                    static mut IS_PWD_OUTPUT: bool = true;
-                                    if let Some(writer) = &mut TERMINAL_WRITER {
-                                        writeln!(writer, "pwd").unwrap();
-                                    }
-                                    // Read output in a separate thread
                                     let mut reader = pty_pair.master.try_clone_reader().unwrap();
+
+                                    // Read output in a separate thread
                                     std::thread::spawn(move || {
                                         let mut buffer = [0u8; 1024];
                                         loop {
@@ -1377,12 +1373,7 @@ fn show_bottom_status_bar(
                                                         .into_owned();
                                                     unsafe {
                                                         if let Some(output) = &mut TERMINAL_OUTPUT {
-                                                            if IS_PWD_OUTPUT {
-                                                                // Skip this PWD output
-                                                                IS_PWD_OUTPUT = false;
-                                                            } else {
-                                                                output.push_str(&str);
-                                                            }
+                                                            output.push_str(&str);
                                                         }
                                                     }
                                                 }
@@ -1402,53 +1393,67 @@ fn show_bottom_status_bar(
                         }
                     }
 
-                    // Terminal UI components
+                    // Single interactive terminal field
                     ui.vertical(|ui| {
                         let available_width = ui.available_width();
 
-                        // Show terminal output in a scroll area
-                        egui::ScrollArea::vertical()
-                            .max_height(150.0)
-                            .stick_to_bottom(true)
-                            .show(ui, |ui| {
-                                if let Some(output) = &TERMINAL_OUTPUT {
-                                    ui.add(
-                                        egui::TextEdit::multiline(&mut output.as_str())
-                                            .desired_width(available_width)
-                                            .font(egui::TextStyle::Monospace)
-                                            .interactive(false),
-                                    );
-                                }
-                            });
-
-                        ui.separator();
-
-                        // Terminal input
-                        if let Some(input) = &mut TERMINAL_INPUT {
-                            let response = ui.add(
-                                egui::TextEdit::singleline(input)
-                                    .min_size(egui::vec2(available_width, 30.0))
-                                    .font(egui::TextStyle::Monospace)
-                                    .hint_text("Type command and press Enter..."),
-                            );
-
-                            if response.lost_focus()
-                                && ui.input(|i| i.key_pressed(egui::Key::Enter))
-                            {
-                                if !input.trim().is_empty() {
-                                    println!("Sending command: {}", input);
-                                    if let Some(writer) = &mut TERMINAL_WRITER {
-                                        writeln!(writer, "{}", input).unwrap();
-                                    } else {
-                                        println!("No writer available");
-                                    }
-                                    input.clear();
-                                }
-                                response.request_focus();
+                        if let (Some(output), Some(input)) =
+                            (&mut TERMINAL_OUTPUT, &mut TERMINAL_INPUT)
+                        {
+                            // Combine output and current input line
+                            let mut terminal_content = output.clone();
+                            if !terminal_content.ends_with('\n') {
+                                terminal_content.push('\n');
                             }
+                            terminal_content.push_str("$ ");
+                            terminal_content.push_str(input);
+
+                            egui::ScrollArea::vertical()
+                                .stick_to_bottom(true)
+                                .auto_shrink([false; 2])
+                                .show(ui, |ui| {
+                                    let response = ui.add(
+                                        egui::TextEdit::multiline(&mut terminal_content)
+                                            .min_size(egui::vec2(available_width, 180.0))
+                                            .font(egui::TextStyle::Monospace)
+                                            .cursor_at_end(true),
+                                    );
+
+                                    // Handle input
+                                    if ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+                                        if !input.trim().is_empty() {
+                                            if let Some(writer) = &mut TERMINAL_WRITER {
+                                                writeln!(writer, "{}", input).unwrap();
+                                            }
+                                            output.push_str("$ ");
+                                            output.push_str(input);
+                                            output.push('\n');
+                                            input.clear();
+
+                                            // Clear the last line from terminal_content
+                                            if let Some(last_line) = terminal_content.lines().last()
+                                            {
+                                                terminal_content.truncate(
+                                                    terminal_content.len() - last_line.len(),
+                                                );
+                                                if terminal_content.ends_with('\n') {
+                                                    terminal_content.push_str("$ ");
+                                                }
+                                            }
+                                        }
+                                        response.request_focus();
+                                    }
+
+                                    // Update input based on new content
+                                    if let Some(last_line) = terminal_content.lines().last() {
+                                        if last_line.starts_with("$ ") {
+                                            *input = last_line[2..].to_string();
+                                        }
+                                    }
+                                });
                         }
 
-                        // Status bar at the bottom
+                        // Status bar
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::BOTTOM), |ui| {
                             ui.add_space(5.0);
                             ui.label(format!(
@@ -1460,7 +1465,7 @@ fn show_bottom_status_bar(
                         });
                     });
                 } else {
-                    // Just show status bar when terminal is closed
+                    // Show status bar when terminal is closed
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::BOTTOM), |ui| {
                         ui.add_space(5.0);
                         ui.label(format!(
