@@ -1,6 +1,12 @@
+use crossterm::{
+    cursor, execute,
+    style::{Color, ResetColor, SetForegroundColor},
+    terminal::{self, Clear, ClearType},
+};
 use eframe::egui;
 use once_cell::sync::OnceCell;
 use serde::Deserialize;
+use std::io::{stdout, Write};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 use syntect::easy::HighlightLines;
@@ -11,6 +17,12 @@ use syntect::util::LinesWithEndings;
 static UPDATE_CHECK_DONE: AtomicBool = AtomicBool::new(false);
 static SHOULD_SHOW_UPDATE: OnceCell<(String, String)> = OnceCell::new();
 static UPDATE_DIALOG_SHOWN: AtomicBool = AtomicBool::new(false);
+
+static mut TERMINAL_PTY: Option<portable_pty::PtyPair> = None;
+static mut TERMINAL_OUTPUT: Option<String> = None;
+static mut TERMINAL_INPUT: Option<String> = None;
+static mut TERMINAL_WRITER: Option<Box<dyn Write + Send>> = None;
+static mut TERMINAL_OPEN: bool = false;
 
 #[derive(Deserialize)]
 struct GithubRelease {
@@ -320,10 +332,13 @@ impl SearchState {
 static mut GIT_RESULT_OPEN: bool = false;
 static mut GIT_RESULT: Option<Result<std::process::Output, std::io::Error>> = None;
 static mut ABOUT_OPEN: bool = false;
+static mut INSERT_OPEN: bool = false;
 
 static mut COMMIT_WINDOW_OPEN: bool = false;
 static mut COMMIT_MESSAGE: String = String::new();
 static mut COMMIT_RESULT: Option<Result<std::process::Output, std::io::Error>> = None;
+
+static mut UNICHAR: String = String::new();
 
 pub fn show_top_panel(
     ctx: &egui::Context,
@@ -447,6 +462,16 @@ pub fn show_top_panel(
                     }
                     ui.close_menu();
                 }
+                if ui.button("Insert character").clicked() {
+                    unsafe {
+                        INSERT_OPEN = true;
+                    }
+                    ui.close_menu();
+                }
+                if ui.button("Toggle terminal").clicked() {
+                    unsafe { TERMINAL_OPEN = !TERMINAL_OPEN };
+                    ui.close_menu();
+                }
             });
 
             ui.menu_button("Git", |ui| {
@@ -474,6 +499,53 @@ pub fn show_top_panel(
                     }
                     ui.close_menu();
                 }
+                ui.menu_button("More Git Options", |ui| {
+                    if ui.button("Init").clicked() {
+                        unsafe {
+                            GIT_RESULT_OPEN = true;
+                            let file_path = std::path::Path::new(&filename);
+                            let parent_dir = file_path.parent().unwrap_or(std::path::Path::new(""));
+
+                            GIT_RESULT = Some(
+                                std::process::Command::new("git")
+                                    .current_dir(parent_dir)
+                                    .arg("init")
+                                    .output(),
+                            );
+                        }
+                        ui.close_menu();
+                    }
+                    if ui.button("Pull").clicked() {
+                        unsafe {
+                            GIT_RESULT_OPEN = true;
+                            let file_path = std::path::Path::new(&filename);
+                            let parent_dir = file_path.parent().unwrap_or(std::path::Path::new(""));
+
+                            GIT_RESULT = Some(
+                                std::process::Command::new("git")
+                                    .current_dir(parent_dir)
+                                    .arg("pull")
+                                    .output(),
+                            );
+                        }
+                        ui.close_menu();
+                    }
+                    if ui.button("Push").clicked() {
+                        unsafe {
+                            GIT_RESULT_OPEN = true;
+                            let file_path = std::path::Path::new(&filename);
+                            let parent_dir = file_path.parent().unwrap_or(std::path::Path::new(""));
+
+                            GIT_RESULT = Some(
+                                std::process::Command::new("git")
+                                    .current_dir(parent_dir)
+                                    .arg("push")
+                                    .output(),
+                            );
+                        }
+                        ui.close_menu();
+                    }
+                });
             });
             ui.menu_button("Help", |ui| {
                 if ui.button("About").clicked() {
@@ -504,6 +576,42 @@ pub fn show_top_panel(
             }
 
             unsafe {
+                egui::Window::new("Insert character")
+                    .open(&mut INSERT_OPEN)
+                    .collapsible(false)
+                    .resizable(false)
+                    .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0))
+                    .show(ctx, |ui| {
+                        ui.label("Type Unicode");
+                        ui.horizontal(|ui| {
+                            ui.label("U+");
+                            static mut UNICODE_INPUT: String = String::new();
+                            if ui
+                                .text_edit_singleline(unsafe { &mut UNICODE_INPUT })
+                                .changed()
+                            {
+                                if let Ok(code) = u32::from_str_radix(unsafe { &UNICODE_INPUT }, 16)
+                                {
+                                    if let Some(c) = char::from_u32(code) {
+                                        UNICHAR = c.to_string();
+                                    }
+                                }
+                            }
+
+                            ui.add_space(10.0);
+
+                            let mut display_text = UNICHAR.clone();
+                            ui.add(
+                                egui::TextEdit::singleline(&mut display_text)
+                                    .interactive(true)
+                                    .font(egui::TextStyle::Monospace)
+                                    .background_color(egui::Color32::from_rgb(0, 0, 0)),
+                            );
+                        });
+                    });
+            }
+
+            unsafe {
                 if GIT_RESULT_OPEN {
                     if let Some(result) = &GIT_RESULT {
                         match result {
@@ -511,7 +619,7 @@ pub fn show_top_panel(
                                 let stdout = String::from_utf8_lossy(&output.stdout);
                                 let stderr = String::from_utf8_lossy(&output.stderr);
 
-                                egui::Window::new("Git Add Result")
+                                egui::Window::new("Git Result")
                                     .open(&mut GIT_RESULT_OPEN)
                                     .collapsible(false)
                                     .resizable(false)
@@ -538,7 +646,7 @@ pub fn show_top_panel(
                                     });
                             }
                             Err(e) => {
-                                egui::Window::new("Git Add Error")
+                                egui::Window::new("Git Error")
                                     .open(&mut GIT_RESULT_OPEN)
                                     .collapsible(false)
                                     .resizable(false)
@@ -976,7 +1084,14 @@ pub fn editor_view(
 
     egui::CentralPanel::default().show(ctx, |ui| {
         let available_width = ui.available_width();
-        let available_height = ui.available_height() - 20.0;
+        let available_height = ui.available_height()
+            - (unsafe {
+                if TERMINAL_OPEN {
+                    260.0
+                } else {
+                    20.0
+                }
+            });
 
         egui::ScrollArea::vertical()
             .max_height(available_height)
@@ -1159,7 +1274,7 @@ pub fn editor_view(
                         (1, 1)
                     };
 
-                    show_bottom_status_bar(ctx, line, col, text);
+                    show_bottom_status_bar(ctx, line, col, text, filename);
                 });
             });
     });
@@ -1184,16 +1299,187 @@ fn calculate_cursor_position(text: &str) -> (usize, usize) {
 
     (line, col)
 }
-fn show_bottom_status_bar(ctx: &egui::Context, line: usize, col: usize, text: &str) {
-    egui::TopBottomPanel::bottom("bottom_panel").show(ctx, |ui| {
-        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            ui.add_space(5.0);
-            ui.label(format!(
-                "{} lines, {} columns | Characters: {}",
-                line,
-                col,
-                text.len()
-            ));
+
+fn create_pty() -> Result<portable_pty::PtyPair, Box<dyn std::error::Error>> {
+    let pty_system = portable_pty::native_pty_system();
+    let pair = pty_system.openpty(portable_pty::PtySize {
+        rows: 24,
+        cols: 80,
+        pixel_width: 0,
+        pixel_height: 0,
+    })?;
+    Ok(pair)
+}
+
+fn show_bottom_status_bar(
+    ctx: &egui::Context,
+    line: usize,
+    col: usize,
+    text: &str,
+    filename: &str,
+) {
+    egui::TopBottomPanel::bottom("bottom_panel")
+        .min_height(unsafe {
+            if TERMINAL_OPEN {
+                220.0
+            } else {
+                20.0
+            }
+        })
+        .max_height(unsafe {
+            if TERMINAL_OPEN {
+                220.0
+            } else {
+                20.0
+            }
+        })
+        .show(ctx, |ui| {
+            unsafe {
+                if TERMINAL_OPEN {
+                    // Initialize terminal state if needed
+                    if TERMINAL_PTY.is_none() {
+                        println!("Initializing PTY");
+                        if let Ok(pty_pair) = create_pty() {
+                            TERMINAL_PTY = Some(pty_pair);
+                            TERMINAL_OUTPUT = Some(String::new());
+                            TERMINAL_INPUT = Some(String::new());
+
+                            // Get the writer
+                            if let Some(pty_pair) = &TERMINAL_PTY {
+                                match pty_pair.master.take_writer() {
+                                    Ok(writer) => TERMINAL_WRITER = Some(writer),
+                                    Err(e) => println!("Failed to get writer: {}", e),
+                                };
+
+                                let mut cmd = portable_pty::CommandBuilder::new("/bin/sh");
+                                // Set up environment variables for proper encoding
+                                cmd.env("TERM", "dumb");
+                                cmd.env("LANG", "en_US.UTF-8");
+                                cmd.env("LC_ALL", "en_US.UTF-8");
+                                if let Some(parent) = std::path::Path::new(&*filename).parent() {
+                                    cmd.cwd(parent);
+                                }
+                                if let Ok(child) = pty_pair.slave.spawn_command(cmd) {
+                                    println!("Shell started successfully");
+                                    static mut IS_PWD_OUTPUT: bool = true;
+                                    if let Some(writer) = &mut TERMINAL_WRITER {
+                                        writeln!(writer, "pwd").unwrap();
+                                    }
+                                    // Read output in a separate thread
+                                    let mut reader = pty_pair.master.try_clone_reader().unwrap();
+                                    std::thread::spawn(move || {
+                                        let mut buffer = [0u8; 1024];
+                                        loop {
+                                            match reader.read(&mut buffer) {
+                                                Ok(0) => break,
+                                                Ok(n) => {
+                                                    let str = String::from_utf8_lossy(&buffer[..n])
+                                                        .into_owned();
+                                                    unsafe {
+                                                        if let Some(output) = &mut TERMINAL_OUTPUT {
+                                                            if IS_PWD_OUTPUT {
+                                                                // Skip this PWD output
+                                                                IS_PWD_OUTPUT = false;
+                                                            } else {
+                                                                output.push_str(&str);
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                                Err(e) => {
+                                                    println!("Read error: {}", e);
+                                                    break;
+                                                }
+                                            }
+                                        }
+                                    });
+                                } else {
+                                    println!("Failed to start shell");
+                                }
+                            }
+                        } else {
+                            println!("Failed to create PTY");
+                        }
+                    }
+
+                    // Terminal UI components
+                    ui.vertical(|ui| {
+                        let available_width = ui.available_width();
+
+                        // Show terminal output in a scroll area
+                        egui::ScrollArea::vertical()
+                            .max_height(150.0)
+                            .stick_to_bottom(true)
+                            .show(ui, |ui| {
+                                if let Some(output) = &TERMINAL_OUTPUT {
+                                    ui.add(
+                                        egui::TextEdit::multiline(&mut output.as_str())
+                                            .desired_width(available_width)
+                                            .font(egui::TextStyle::Monospace)
+                                            .interactive(false),
+                                    );
+                                }
+                            });
+
+                        ui.separator();
+
+                        // Terminal input
+                        if let Some(input) = &mut TERMINAL_INPUT {
+                            let response = ui.add(
+                                egui::TextEdit::singleline(input)
+                                    .min_size(egui::vec2(available_width, 30.0))
+                                    .font(egui::TextStyle::Monospace)
+                                    .hint_text("Type command and press Enter..."),
+                            );
+
+                            if response.lost_focus()
+                                && ui.input(|i| i.key_pressed(egui::Key::Enter))
+                            {
+                                if !input.trim().is_empty() {
+                                    println!("Sending command: {}", input);
+                                    if let Some(writer) = &mut TERMINAL_WRITER {
+                                        writeln!(writer, "{}", input).unwrap();
+                                    } else {
+                                        println!("No writer available");
+                                    }
+                                    input.clear();
+                                }
+                                response.request_focus();
+                            }
+                        }
+
+                        // Status bar at the bottom
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::BOTTOM), |ui| {
+                            ui.add_space(5.0);
+                            ui.label(format!(
+                                "{} lines, {} columns | Characters: {}",
+                                line,
+                                col,
+                                text.len()
+                            ));
+                        });
+                    });
+                } else {
+                    // Just show status bar when terminal is closed
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::BOTTOM), |ui| {
+                        ui.add_space(5.0);
+                        ui.label(format!(
+                            "{} lines, {} columns | Characters: {}",
+                            line,
+                            col,
+                            text.len()
+                        ));
+                    });
+
+                    // Cleanup terminal when closed
+                    if TERMINAL_PTY.is_some() {
+                        println!("Cleaning up terminal");
+                        TERMINAL_PTY = None;
+                        TERMINAL_OUTPUT = None;
+                        TERMINAL_INPUT = None;
+                        TERMINAL_WRITER = None;
+                    }
+                }
+            }
         });
-    });
 }
