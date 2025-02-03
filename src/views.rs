@@ -539,6 +539,168 @@ pub fn show_top_panel(
                     unsafe { TERMINAL_OPEN = !TERMINAL_OPEN };
                     ui.close_menu();
                 }
+                if filename.ends_with(".rs") {
+                    ui.menu_button("Rust options", |ui| {
+                        if ui.button("Build").clicked() {
+                            unsafe {
+                                GIT_RESULT_OPEN = true;
+                                let file_path = std::path::Path::new(&filename);
+                                let parent_dir =
+                                    file_path.parent().unwrap_or(std::path::Path::new(""));
+
+                                GIT_RESULT = Some(
+                                    std::process::Command::new("cargo")
+                                        .current_dir(parent_dir)
+                                        .arg("build")
+                                        .output(),
+                                );
+                            }
+                            ui.close_menu();
+                        }
+                        if ui.button("Run").clicked() {
+                            unsafe {
+                                TERMINAL_OPEN = true;
+                                if TERMINAL_PTY.is_none() {
+                                    if let Ok(pty_pair) = create_pty() {
+                                        TERMINAL_PTY = Some(pty_pair);
+                                        TERMINAL_OUTPUT = Some(String::new());
+                                        TERMINAL_INPUT = Some(String::new());
+
+                                        if let Some(pty_pair) = &TERMINAL_PTY {
+                                            if let Ok(writer) = pty_pair.master.take_writer() {
+                                                TERMINAL_WRITER = Some(writer);
+                                            }
+
+                                            let mut cmd =
+                                                portable_pty::CommandBuilder::new("cargo");
+                                            cmd.env("TERM", "dumb");
+                                            cmd.arg("run");
+
+                                            if let Some(parent) =
+                                                std::path::Path::new(&filename).parent()
+                                            {
+                                                cmd.cwd(parent);
+                                            }
+
+                                            if let Some(writer) = &mut TERMINAL_WRITER {
+                                                if let Ok(child) = pty_pair.slave.spawn_command(cmd)
+                                                {
+                                                    let mut reader =
+                                                        pty_pair.master.try_clone_reader().unwrap();
+                                                    std::thread::spawn(move || {
+                                                        let mut buffer = [0u8; 1024];
+                                                        loop {
+                                                            match reader.read(&mut buffer) {
+                                                                Ok(0) => break,
+                                                                Ok(n) => {
+                                                                    let str =
+                                                                        String::from_utf8_lossy(
+                                                                            &buffer[..n],
+                                                                        )
+                                                                        .into_owned();
+                                                                    unsafe {
+                                                                        if let Some(output) =
+                                                                            &mut TERMINAL_OUTPUT
+                                                                        {
+                                                                            output.push_str(&str);
+                                                                        }
+                                                                    }
+                                                                }
+                                                                Err(_) => break,
+                                                            }
+                                                        }
+                                                    });
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            ui.close_menu();
+                        }
+                        if ui.button("Check").clicked() {
+                            unsafe {
+                                GIT_RESULT_OPEN = true;
+                                let file_path = std::path::Path::new(&filename);
+                                let parent_dir =
+                                    file_path.parent().unwrap_or(std::path::Path::new(""));
+
+                                GIT_RESULT = Some(
+                                    std::process::Command::new("cargo")
+                                        .current_dir(parent_dir)
+                                        .arg("check")
+                                        .output(),
+                                );
+                            }
+                            ui.close_menu();
+                        }
+                    });
+                }
+                if filename.ends_with(".py") {
+                    ui.menu_button("Python options", |ui| {
+                        if ui.button("Run").clicked() {
+                            unsafe {
+                                TERMINAL_OPEN = true;
+                                if TERMINAL_PTY.is_none() {
+                                    if let Ok(pty_pair) = create_pty() {
+                                        TERMINAL_PTY = Some(pty_pair);
+                                        TERMINAL_OUTPUT = Some(String::new());
+                                        TERMINAL_INPUT = Some(String::new());
+
+                                        if let Some(pty_pair) = &TERMINAL_PTY {
+                                            if let Ok(writer) = pty_pair.master.take_writer() {
+                                                TERMINAL_WRITER = Some(writer);
+                                            }
+
+                                            let mut cmd =
+                                                portable_pty::CommandBuilder::new("python");
+                                            cmd.env("TERM", "dumb");
+                                            cmd.arg(&filename);
+
+                                            if let Some(parent) =
+                                                std::path::Path::new(filename).parent()
+                                            {
+                                                cmd.cwd(parent);
+                                            }
+
+                                            if let Some(writer) = &mut TERMINAL_WRITER {
+                                                if let Ok(child) = pty_pair.slave.spawn_command(cmd)
+                                                {
+                                                    let mut reader =
+                                                        pty_pair.master.try_clone_reader().unwrap();
+                                                    std::thread::spawn(move || {
+                                                        let mut buffer = [0u8; 1024];
+                                                        loop {
+                                                            match reader.read(&mut buffer) {
+                                                                Ok(0) => break,
+                                                                Ok(n) => {
+                                                                    let str =
+                                                                        String::from_utf8_lossy(
+                                                                            &buffer[..n],
+                                                                        )
+                                                                        .into_owned();
+                                                                    unsafe {
+                                                                        if let Some(output) =
+                                                                            &mut TERMINAL_OUTPUT
+                                                                        {
+                                                                            output.push_str(&str);
+                                                                        }
+                                                                    }
+                                                                }
+                                                                Err(_) => break,
+                                                            }
+                                                        }
+                                                    });
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            ui.close_menu();
+                        }
+                    });
+                }
             });
 
             ui.menu_button("Git", |ui| {
