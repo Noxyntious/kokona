@@ -517,6 +517,18 @@ pub fn show_top_panel(
                     }
                     ui.close_menu();
                 }
+                if ui.button("New file in working directory").clicked() {
+                    if let Some(path) = rfd::FileDialog::new()
+                        .set_title("New file in working directory")
+                        .save_file()
+                    {
+                        let newpath = path.display().to_string();
+                        if let Err(e) = std::fs::write(&newpath, "") {
+                            println!("Error creating file: {}", e);
+                        }
+                    }
+                    ui.close_menu();
+                }
                 if ui.button("Insert character").clicked() {
                     unsafe {
                         INSERT_OPEN = true;
