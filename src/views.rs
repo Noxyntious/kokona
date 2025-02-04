@@ -1083,14 +1083,12 @@ pub fn home_view(
         }
     }
 
-    // Delayed update check
     if !UPDATE_CHECK_DONE.load(Ordering::SeqCst) {
         UPDATE_CHECK_DONE.store(true, Ordering::SeqCst);
 
-        // Schedule the update check after a short delay
         let ctx_clone = ctx.clone();
         std::thread::spawn(move || {
-            // Wait for 2 seconds to let the application load
+            // wait for 2 seconds to let the application load
             std::thread::sleep(std::time::Duration::from_millis(500));
 
             std::thread::Builder::new()
@@ -1183,7 +1181,11 @@ pub fn home_view(
             });
         });
         ui.with_layout(egui::Layout::bottom_up(egui::Align::RIGHT), |ui| {
-            ui.label("kokona.nijika.dev");
+            if ui.link("kokona.nijika.dev").clicked() {
+                if let Err(e) = open::that("https://kokona.nijika.dev") {
+                    println!("Failed to open URL: {}", e);
+                }
+            }
         });
     });
 
