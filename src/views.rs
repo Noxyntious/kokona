@@ -380,6 +380,7 @@ impl SearchState {
     }
 }
 static mut GIT_RESULT_OPEN: bool = false;
+static mut GIT_RESULT_TEXT: String = String::new();
 static mut GIT_RESULT: Option<Result<std::process::Output, std::io::Error>> = None;
 static mut INSERT_OPEN: bool = false;
 
@@ -701,12 +702,101 @@ pub fn show_top_panel(
                         }
                     });
                 }
+                if filename.ends_with(".c") {
+                    ui.menu_button("C options", |ui| {
+                        if ui.button("Build").clicked() {
+                            unsafe {
+                                GIT_RESULT_TEXT = String::from("Project built successfully");
+                                GIT_RESULT_OPEN = true;
+                                let file_path = std::path::Path::new(&filename);
+                                let parent_dir =
+                                    file_path.parent().unwrap_or(std::path::Path::new(""));
+                                let output_name = file_path.file_stem().unwrap().to_str().unwrap();
+
+                                GIT_RESULT = Some(
+                                    std::process::Command::new("gcc")
+                                        .current_dir(parent_dir)
+                                        .arg(&filename)
+                                        .arg("-o")
+                                        .arg(output_name)
+                                        .output(),
+                                );
+                            }
+                            ui.close_menu();
+                        }
+                        if ui.button("Run").clicked() {
+                            unsafe {
+                                TERMINAL_OPEN = true;
+                                if TERMINAL_PTY.is_none() {
+                                    if let Ok(pty_pair) = create_pty() {
+                                        TERMINAL_PTY = Some(pty_pair);
+                                        TERMINAL_OUTPUT = Some(String::new());
+                                        TERMINAL_INPUT = Some(String::new());
+
+                                        if let Some(pty_pair) = &TERMINAL_PTY {
+                                            if let Ok(writer) = pty_pair.master.take_writer() {
+                                                TERMINAL_WRITER = Some(writer);
+                                            }
+
+                                            let file_path = std::path::Path::new(&filename);
+                                            let parent_dir = file_path
+                                                .parent()
+                                                .unwrap_or(std::path::Path::new(""));
+                                            let output_name =
+                                                file_path.file_stem().unwrap().to_str().unwrap();
+
+                                            let mut cmd = portable_pty::CommandBuilder::new(
+                                                format!("./{}", output_name),
+                                            );
+                                            cmd.env("TERM", "dumb");
+                                            cmd.cwd(parent_dir);
+
+                                            if let Some(writer) = &mut TERMINAL_WRITER {
+                                                if let Ok(child) = pty_pair.slave.spawn_command(cmd)
+                                                {
+                                                    let mut reader =
+                                                        pty_pair.master.try_clone_reader().unwrap();
+                                                    std::thread::spawn(move || {
+                                                        let mut buffer = [0u8; 1024];
+                                                        loop {
+                                                            match reader.read(&mut buffer) {
+                                                                Ok(0) => break,
+                                                                Ok(n) => {
+                                                                    let str =
+                                                                        String::from_utf8_lossy(
+                                                                            &buffer[..n],
+                                                                        )
+                                                                        .into_owned();
+                                                                    unsafe {
+                                                                        if let Some(output) =
+                                                                            &mut TERMINAL_OUTPUT
+                                                                        {
+                                                                            output.push_str(&str);
+                                                                        }
+                                                                    }
+                                                                }
+                                                                Err(_) => break,
+                                                            }
+                                                        }
+                                                    });
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            ui.close_menu();
+                        }
+                    });
+                }
             });
 
             ui.menu_button("Git", |ui| {
                 if ui.button("Add current file").clicked() {
                     unsafe {
+                        GIT_RESULT_TEXT = String::from("File added successfully");
                         GIT_RESULT_OPEN = true;
+
                         // Get the parent directory of the file
                         let file_path = std::path::Path::new(&filename);
                         let parent_dir = file_path.parent().unwrap_or(std::path::Path::new(""));
@@ -897,7 +987,7 @@ pub fn show_top_panel(
                                 let stdout = String::from_utf8_lossy(&output.stdout);
                                 let stderr = String::from_utf8_lossy(&output.stderr);
 
-                                egui::Window::new("Git Result")
+                                egui::Window::new("Result")
                                     .open(&mut GIT_RESULT_OPEN)
                                     .collapsible(false)
                                     .resizable(false)
@@ -911,7 +1001,7 @@ pub fn show_top_panel(
                                             ui.label(format!("Error: {}", stderr));
                                         }
                                         if stdout.is_empty() && stderr.is_empty() {
-                                            ui.label("File added successfully.");
+                                            ui.label(&GIT_RESULT_TEXT);
                                         }
                                         ui.with_layout(
                                             egui::Layout::right_to_left(egui::Align::RIGHT),
