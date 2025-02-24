@@ -28,7 +28,7 @@ struct GithubRelease {
 
 #[derive(Serialize, Deserialize, Clone)]
 pub struct EditorSettings {
-    pub font_size: f32, // Just one sample setting
+    pub font_size: f32,
 }
 
 #[derive(Default)]
