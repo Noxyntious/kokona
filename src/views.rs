@@ -407,8 +407,7 @@ pub fn show_top_panel(
                             Ok(content) => {
                                 *text_content = content; // Update the TextEdit content
                                 *filename = path.display().to_string(); // Set filename to the path
-                                                                        // Switch view after content is loaded
-                                *current_view = ViewType::Editor;
+                                *current_view = ViewType::Editor; // Switch view after content is loaded
                                 unsafe {
                                     if let Some(editor_state) = EDITOR_STATE.as_mut() {
                                         editor_state.set_syntax_for_extension(&filename);
