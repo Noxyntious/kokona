@@ -189,5 +189,51 @@ fn main() -> Result<(), eframe::Error> {
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap()
         .as_secs() as i64;
-    eframe::run_native("Kokona", options, Box::new(move |_cc| Ok(Box::new(app))))
+    eframe::run_native(
+        "Kokona",
+        options,
+        Box::new(move |_cc| {
+            #[cfg(any(target_os = "windows", target_os = "macos"))]
+            chinese_characters_support::add_font(_cc);
+
+            Ok(Box::new(app))
+        }),
+    )
+}
+
+#[cfg(any(target_os = "windows", target_os = "macos"))]
+mod chinese_characters_support {
+    use egui::epaint::text::{FontData, FontFamily, FontInsert, FontPriority, InsertFontFamily};
+    use std::fs;
+
+    fn font_info() -> (&'static str, &'static str) {
+        #[cfg(target_os = "windows")]
+        {
+            ("simhei", r"C:\Windows\Fonts\simhei.ttf")
+        }
+        #[cfg(target_os = "macos")]
+        {
+            // The egui docs doesn't say it supports ttc files, but it works
+            (
+                "Hiragino Sans GB",
+                "/System/Library/Fonts/Hiragino Sans GB.ttc",
+            )
+        }
+    }
+
+    pub fn add_font(cc: &eframe::CreationContext) {
+        let (name, path) = font_info();
+        let Ok(raw_font_data) = fs::read(path) else {
+            return;
+        };
+
+        cc.egui_ctx.add_font(FontInsert::new(
+            name,
+            FontData::from_owned(raw_font_data),
+            vec![InsertFontFamily {
+                family: FontFamily::Monospace,
+                priority: FontPriority::Lowest,
+            }],
+        ));
+    }
 }
