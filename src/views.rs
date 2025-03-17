@@ -400,6 +400,19 @@ pub fn show_top_panel(
     egui::TopBottomPanel::top("top_panel").show(ctx, |ui| {
         egui::menu::bar(ui, |ui| {
             ui.menu_button("Kokona", |ui| {
+                if ui.button("New").clicked() {
+                    *text_content = String::new();
+                    *filename = "untitled.txt".to_string();
+                    *current_view = ViewType::Editor;
+                    unsafe {
+                        if let Some(editor_state) = EDITOR_STATE.as_mut() {
+                            editor_state.set_syntax_for_extension(&filename);
+                        }
+                    }
+                    ctx.send_viewport_cmd(egui::ViewportCommand::Title("Kokona".into()));
+                    WAS_MODIFIED.store(false, Ordering::SeqCst);
+                    ui.close_menu();
+                }
                 if ui.button("Open").clicked() {
                     if let Some(path) = rfd::FileDialog::new().set_title("Open File").pick_file() {
                         // Read the file contents first

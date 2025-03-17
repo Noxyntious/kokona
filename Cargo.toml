@@ -8,7 +8,6 @@ clap = { version = "4.5.27", features = ["derive"] }
 discord-rich-presence = "0.2.5"
 eframe = "0.30.0"
 egui = "0.30.0"
-image = "0.24.0"
 rfd = "0.15.2"
 syntect = "5.2.0"
 reqwest = { version = "0.11", features = ["json"] }
@@ -17,6 +16,6 @@ serde_json = "1.0"
 tokio = { version = "1.0", features = ["full"] }
 open = "3.0"
 once_cell = "1.20.2"
-crossterm = "0.28.1"
 portable-pty = "0.8.1"
 directories-next = "2.0.0"
+openssl = { version = "0.10.69", features = ["vendored"] }
