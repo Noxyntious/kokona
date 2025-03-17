@@ -1,5 +1,6 @@
 # Kokona
 a multipurpose simple text editor written with egui and rust.
+![kokona](https://github.com/user-attachments/assets/796d968d-5460-49e8-b88f-8218c63c5fb5)
 
 ## current features
 - editing text
