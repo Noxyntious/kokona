@@ -1,239 +1,154 @@
-#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+use gtk4::gio;
+use gtk4::prelude::*;
+use relm4::prelude::*;
+use sourceview5::prelude::*;
 
-pub mod consts;
-mod views;
-use clap::Parser;
-use discord_rich_presence::{DiscordIpc, DiscordIpcClient};
-use eframe::{egui, App, Frame, NativeOptions};
-use std::sync::atomic::Ordering;
-use views::ViewType;
-use views::WAS_MODIFIED;
+mod editor;
+mod home;
+mod misc;
 
-#[derive(Parser)]
-#[command(author, version, about, long_about = None)]
-struct Cli {
-    file: Option<String>,
+use crate::editor::EditorModel;
+use crate::home::HomeModel;
+
+#[derive(Debug, Default)]
+pub enum View {
+    #[default]
+    Home,
+    Editor(String),
 }
+
 #[derive(Default)]
-struct MyApp {
-    current_view: ViewType,
-    opened: String,
-    filename: String,
-    show_confirm_dialog: bool,
-    is_modified: bool,
-    initial_file: Option<String>,
-    discord: Option<DiscordIpcClient>,
-    start_timestamp: i64,
+pub struct AppModel {
+    current_view: View,
 }
 
-impl App for MyApp {
-    fn update(&mut self, ctx: &egui::Context, _frame: &mut Frame) {
-        if let Some(file_path) = self.initial_file.take() {
-            match std::fs::read_to_string(&file_path) {
-                Ok(content) => {
-                    self.current_view = ViewType::Editor;
-                    self.filename = file_path;
-                    self.opened = content;
-                    ctx.send_viewport_cmd(egui::ViewportCommand::Title("Kokona".into()));
-                    if let Some(discord) = &mut self.discord {
-                        discord
-                            .set_activity(
-                                discord_rich_presence::activity::Activity::new()
-                                    .state("Editing")
-                                    .details(&self.filename),
-                            )
-                            .ok();
+#[derive(Debug)]
+pub enum AppMsg {
+    SwitchToEditor(String),
+    SwitchToHome,
+}
+
+#[relm4::component(pub)]
+impl SimpleComponent for AppModel {
+    type Init = ();
+    type Input = AppMsg;
+    type Output = ();
+
+    view! {
+        main_window = gtk::Window {
+            set_title: Some("Kokona"),
+            set_default_size: (1280, 720),
+
+            gtk::Box {
+                set_orientation: gtk::Orientation::Vertical,
+
+                if matches!(model.current_view, View::Home) {
+                    gtk::Box {
+                        set_orientation: gtk::Orientation::Vertical,
+                        set_spacing: 10,
+                        set_margin_all: 20,
+
+                        gtk::Button {
+                            set_label: "New File",
+                            connect_clicked[sender] => move |_| {
+                                sender.input(AppMsg::SwitchToEditor("".to_string()));
+                            }
+                        },
+
+                        gtk::Button {
+                            set_label: "Open File",
+                            connect_clicked[sender] => move |_| {
+                                sender.input(AppMsg::SwitchToEditor("".to_string()));
+                            }
+                        }
+                    }
+                } else if let View::Editor(content) = &model.current_view {
+                    gtk::Box {
+                        set_orientation: gtk::Orientation::Vertical,
+                        set_spacing: 0,
+
+                        gtk::PopoverMenuBar::from_model(Some(&{
+                            let menu: gtk4::gio::MenuModel = misc::build_menu().into();
+                            menu
+                        })) {},
+
+                        #[name = "source_view"]
+                        sourceview5::View {
+                            set_vexpand: true,
+                            set_hexpand: true,
+                            set_wrap_mode: gtk::WrapMode::WordChar,
+                            set_show_line_numbers: true,
+                            set_highlight_current_line: true,
+                            set_monospace: true,
+                            set_background_pattern: sourceview5::BackgroundPatternType::None,
+                            set_buffer: Some(&{
+                                let buffer = sourceview5::Buffer::new(None);
+                                let style_manager = sourceview5::StyleSchemeManager::default();
+                                if let Some(scheme) = style_manager.scheme("Adwaita-dark") {
+                                    buffer.set_style_scheme(Some(&scheme));
+                                }
+                                buffer
+                            }),
+                        },
+
+                        gtk::Box {
+                            set_orientation: gtk::Orientation::Horizontal,
+
+                            gtk::Label {
+                                set_hexpand: true,
+                                set_xalign: 1.0,
+                                set_text: "Line 1, Column 1 | Characters: 0",
+                                set_margin_end: 10,
+                                set_margin_bottom: 5,
+                                set_margin_top: 5,
+                            }
+                        }
+                    }
+                } else {
+                    gtk::Box {
+                        set_orientation: gtk::Orientation::Vertical,
+                        append = &gtk::Label {
+                            set_label: "Unknown View"
+                        }
                     }
                 }
-                Err(e) => {
-                    rfd::MessageDialog::new()
-                        .set_title("Error")
-                        .set_description(&format!("Error opening file: {}", e))
-                        .set_level(rfd::MessageLevel::Error)
-                        .show();
-                }
             }
         }
-        // Handle close request first, before any other updates
-        if ctx.input(|i| i.viewport().close_requested()) && !self.show_confirm_dialog {
-            let modif = WAS_MODIFIED.load(Ordering::SeqCst);
-            if modif {
-                self.show_confirm_dialog = true;
-                ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
-                return; // Exit early to prevent the close
-            } else {
-                ctx.send_viewport_cmd(egui::ViewportCommand::Close);
-                return;
+    }
+
+    fn init(
+        _: Self::Init,
+        root: Self::Root,
+        sender: ComponentSender<Self>,
+    ) -> ComponentParts<Self> {
+        let model = AppModel::default();
+        let widgets = view_output!();
+
+        if let View::Editor(_) = model.current_view {
+            let buffer = sourceview5::Buffer::new(None);
+            let style_manager = sourceview5::StyleSchemeManager::default();
+            if let Some(scheme) = style_manager.scheme("Adwaita-dark") {
+                buffer.set_style_scheme(Some(&scheme));
             }
+            widgets.source_view.set_buffer(Some(&buffer));
         }
 
-        // Show dialog if needed
-        if self.show_confirm_dialog {
-            egui::Window::new("Unsaved Changes")
-                .collapsible(false)
-                .resizable(false)
-                .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
-                .fixed_size([300.0, 65.0])
-                .show(ctx, |ui| {
-                    ui.vertical_centered(|ui| {
-                        ui.label("You have unsaved changes.");
-                        ui.label("Would you really like to close Kokona?");
-                        ui.add_space(8.0);
-                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            if ui.button("Yes").clicked() {
-                                WAS_MODIFIED.store(false, Ordering::SeqCst);
-                                self.show_confirm_dialog = false;
-                                ctx.send_viewport_cmd(egui::ViewportCommand::Close);
-                                return;
-                            }
-                            if ui.button("No").clicked() {
-                                self.show_confirm_dialog = false;
-                            }
-                        });
-                    });
-                });
-        }
+        ComponentParts { model, widgets }
+    }
 
-        match self.current_view {
-            ViewType::Home => {
-                views::home_view(
-                    ctx,
-                    &mut self.current_view,
-                    &mut self.filename,
-                    &mut self.opened,
-                );
-                if let Some(discord) = &mut self.discord {
-                    discord
-                        .set_activity(
-                            discord_rich_presence::activity::Activity::new()
-                                .state("In menu")
-                                .details("Idling")
-                                .timestamps(
-                                    discord_rich_presence::activity::Timestamps::new()
-                                        .start(self.start_timestamp),
-                                ),
-                        )
-                        .ok();
-                }
+    fn update(&mut self, msg: Self::Input, _sender: ComponentSender<Self>) {
+        match msg {
+            AppMsg::SwitchToEditor(content) => {
+                self.current_view = View::Editor(content);
             }
-            ViewType::Editor => {
-                let modified = views::editor_view(
-                    ctx,
-                    &mut self.opened,
-                    &mut self.filename,
-                    &mut self.current_view,
-                );
-                if modified {
-                    self.is_modified = true;
-                }
-                if let Some(discord) = &mut self.discord {
-                    discord
-                        .set_activity(
-                            discord_rich_presence::activity::Activity::new()
-                                .details(&format!(
-                                    "In {}",
-                                    if self.filename == "untitled.txt" {
-                                        "no directory"
-                                    } else {
-                                        std::path::Path::new(&self.filename)
-                                            .parent()
-                                            .and_then(|p| p.file_name())
-                                            .and_then(|n| n.to_str())
-                                            .unwrap_or("Unknown Directory")
-                                    }
-                                ))
-                                .state(&format!(
-                                    "Working on {}",
-                                    std::path::Path::new(&self.filename)
-                                        .file_name()
-                                        .and_then(|n| n.to_str())
-                                        .unwrap_or(&self.filename)
-                                ))
-                                .timestamps(
-                                    discord_rich_presence::activity::Timestamps::new()
-                                        .start(self.start_timestamp),
-                                ),
-                        )
-                        .ok();
-                }
+            AppMsg::SwitchToHome => {
+                self.current_view = View::Home;
             }
         }
-
-        //        if ctx.input(|i| i.key_pressed(egui::Key::Tab)) {
-        //            self.current_view = match self.current_view {
-        //                ViewType::Home => ViewType::Editor,
-        //                ViewType::Editor => ViewType::Home,
-        //            };
-        //        }
-        // uncommenting this allows you to hit "Tab" to switch views
-        // this is debug behavior that should not be included in release builds
-        // except that it was in v0.1. oh well
     }
 }
-fn main() -> Result<(), eframe::Error> {
-    let cli = Cli::parse();
-    let mut discord = DiscordIpcClient::new("1332264064025362493").unwrap();
-    discord.connect().ok();
 
-    let options = NativeOptions {
-        vsync: true,
-        multisampling: 4,
-        viewport: egui::ViewportBuilder::default().with_inner_size([1280.0, 720.0]),
-        ..Default::default()
-    };
-
-    let mut app = MyApp::default();
-    app.initial_file = cli.file;
-    app.discord = Some(discord);
-    app.start_timestamp = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap()
-        .as_secs() as i64;
-    eframe::run_native(
-        "Kokona",
-        options,
-        Box::new(move |_cc| {
-            #[cfg(any(target_os = "windows", target_os = "macos"))]
-            chinese_characters_support::add_font(_cc);
-
-            Ok(Box::new(app))
-        }),
-    )
-}
-
-#[cfg(any(target_os = "windows", target_os = "macos"))]
-mod chinese_characters_support {
-    use egui::epaint::text::{FontData, FontFamily, FontInsert, FontPriority, InsertFontFamily};
-    use std::fs;
-
-    fn font_info() -> (&'static str, &'static str) {
-        #[cfg(target_os = "windows")]
-        {
-            ("simhei", r"C:\Windows\Fonts\simhei.ttf")
-        }
-        #[cfg(target_os = "macos")]
-        {
-            // The egui docs doesn't say it supports ttc files, but it works
-            (
-                "Hiragino Sans GB",
-                "/System/Library/Fonts/Hiragino Sans GB.ttc",
-            )
-        }
-    }
-
-    pub fn add_font(cc: &eframe::CreationContext) {
-        let (name, path) = font_info();
-        let Ok(raw_font_data) = fs::read(path) else {
-            return;
-        };
-
-        cc.egui_ctx.add_font(FontInsert::new(
-            name,
-            FontData::from_owned(raw_font_data),
-            vec![InsertFontFamily {
-                family: FontFamily::Monospace,
-                priority: FontPriority::Lowest,
-            }],
-        ));
-    }
+fn main() {
+    let app = RelmApp::new("dev.eri.kokona");
+    app.run::<AppModel>(());
 }
